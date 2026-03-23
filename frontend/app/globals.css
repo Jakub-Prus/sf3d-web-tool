@@ -1,0 +1,37 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+  --page-ink: #111827;
+  --page-soft: #5b6678;
+  --page-card: rgba(255, 250, 242, 0.9);
+  --page-line: rgba(15, 76, 92, 0.12);
+  --page-highlight: #ff7a18;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  color: var(--page-ink);
+  background:
+    radial-gradient(circle at top left, rgba(255, 122, 24, 0.18), transparent 30%),
+    radial-gradient(circle at top right, rgba(15, 76, 92, 0.18), transparent 28%),
+    linear-gradient(180deg, #f7efe4 0%, #eef6f7 100%);
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}

@@ -1,0 +1,11 @@
+model = "gpt-5.4-mini"
+model_reasoning_effort = "low"
+approval_policy = "on-failure"
+personality = "pragmatic"
+
+[windows]
+sandbox = "workspace-write"
+
+[workspace]
+root_markers = [".git", "AGENTS.md", ".codex/config.toml"]
+prefer_cwd_as_root = true

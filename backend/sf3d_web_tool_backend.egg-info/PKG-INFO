@@ -1,0 +1,12 @@
+Metadata-Version: 2.4
+Name: sf3d-web-tool-backend
+Version: 0.1.0
+Summary: FastAPI backend scaffold for the SF3D Web Tool project.
+Requires-Python: >=3.11
+Requires-Dist: fastapi<1.0.0,>=0.116.0
+Requires-Dist: pydantic-settings<3.0.0,>=2.7.1
+Requires-Dist: python-multipart<1.0.0,>=0.0.20
+Requires-Dist: uvicorn[standard]<1.0.0,>=0.34.0
+Provides-Extra: dev
+Requires-Dist: httpx<1.0.0,>=0.28.1; extra == "dev"
+Requires-Dist: pytest<9.0.0,>=8.3.5; extra == "dev"
