@@ -37,7 +37,10 @@ sf3d-web-tool/
 
 - A dedicated Git repository has been initialized in this folder.
 - The FastAPI app exposes `GET /api/health` and `POST /api/generate-3d`.
-- The generation endpoint currently runs a mock contract flow:
+- The generation endpoint supports two paths:
+  - default mock contract flow for local scaffold work
+  - official `stable-fast-3d` runner execution when mock mode is disabled and the upstream repo is installed
+- The mock flow currently:
   - saves the uploaded image
   - records preprocessing choices
   - writes placeholder metadata for the future SF3D integration
@@ -49,10 +52,10 @@ sf3d-web-tool/
 
 ## Immediate next steps
 
-1. Clone the official SF3D repository into [models/](c:\github\my-projects\sf3d-web-tool\models).
-2. Replace the mock inference service in [backend/app/services/inference.py](c:\github\my-projects\sf3d-web-tool\backend\app\services\inference.py) with the real SF3D runner.
-3. Add GLB or OBJ loading in [frontend/components/viewer-panel.tsx](c:\github\my-projects\sf3d-web-tool\frontend\components\viewer-panel.tsx).
-4. Add preprocessing with Pillow or OpenCV in [backend/app/services/preprocess.py](c:\github\my-projects\sf3d-web-tool\backend\app\services\preprocess.py).
+1. Install the upstream `stable-fast-3d` Python dependencies and Hugging Face access in [models/stable-fast-3d](c:\github\my-projects\sf3d-web-tool\models\stable-fast-3d).
+2. Disable mock mode and validate backend inference end to end through [backend/app/services/inference.py](c:\github\my-projects\sf3d-web-tool\backend\app\services\inference.py).
+3. Add GLB loading in [frontend/components/viewer-panel.tsx](c:\github\my-projects\sf3d-web-tool\frontend\components\viewer-panel.tsx).
+4. Add first-class preprocessing with Pillow or OpenCV in [backend/app/services/preprocess.py](c:\github\my-projects\sf3d-web-tool\backend\app\services\preprocess.py).
 
 ## Setup outline
 
@@ -64,6 +67,13 @@ python -m venv .venv
 .venv\Scripts\Activate.ps1
 pip install -e .[dev]
 uvicorn app.main:app --reload --port 8000
+```
+
+To run the official SF3D path instead of the mock contract, install the upstream repo dependencies under [models/stable-fast-3d](c:\github\my-projects\sf3d-web-tool\models\stable-fast-3d), then set:
+
+```powershell
+$env:SF3D_ENABLE_MOCK_INFERENCE="false"
+$env:SF3D_REPO_DIR="c:\github\my-projects\sf3d-web-tool\models\stable-fast-3d"
 ```
 
 ### Frontend

@@ -4,7 +4,11 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
 
 from app.core.config import get_settings
 from app.models.schemas import ExportFormat, GenerationResponse
-from app.services.inference import SF3DInferenceService
+from app.services.inference import (
+    SF3DInferenceService,
+    SF3DRunnerError,
+    UnsupportedGenerationOptionError,
+)
 from app.services.preprocess import PreprocessOptions
 
 router = APIRouter(tags=["generation"])
@@ -46,4 +50,12 @@ async def generate_3d(
         normalize_size=normalize_size,
     )
     service = SF3DInferenceService(settings)
-    return await service.generate(image, image_bytes, preprocess_options, export_format)
+    try:
+        return await service.generate(image, image_bytes, preprocess_options, export_format)
+    except UnsupportedGenerationOptionError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except SF3DRunnerError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
+        ) from exc
