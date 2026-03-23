@@ -21,7 +21,7 @@ export function UploadPanel() {
   const [result, setResult] = useState<GenerationResponse | null>(null);
 
   const fileSummary = file
-    ? `${file.name} · ${(file.size / BYTES_PER_MEGABYTE).toFixed(2)} MB`
+    ? `${file.name} - ${(file.size / BYTES_PER_MEGABYTE).toFixed(2)} MB`
     : "PNG, JPEG, or WEBP up to 10 MB";
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
