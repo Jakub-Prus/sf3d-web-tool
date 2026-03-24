@@ -48,21 +48,24 @@
 - Frontend upload, inspector, downloads, and GLB viewer are implemented.
 - Local preprocessing currently applies normalization and alpha-based auto-crop.
 - Backend tests pass and frontend production build passes.
-- Runtime alignment is still in progress because fresh-clone mode defaults, health/readiness messaging, and clean typecheck behavior need to match.
+- Runtime alignment now includes three usable paths:
+  - `mock` for placeholder contract testing
+  - `local` for preview-capable silhouette extrusion fallback
+  - `real` for the official SF3D runner when the upstream environment is ready
+- The viewer now keeps a persistent canvas mounted and includes explicit context-loss recovery UI.
 
 ## Current gaps
 
-- Runtime mode defaults and developer-facing docs are inconsistent.
-- The clean-clone frontend typecheck workflow is brittle because it relies on `.next/types` existing first.
-- The UI previously exposed `obj` even though the real runner rejects it.
+- The official SF3D Windows environment still depends on native upstream extensions and gated model access.
+- The local preview fallback is intentionally lower fidelity than the official SF3D output.
 - Background removal remains requested-but-not-applied locally.
 
 ## Next fix slice
 
-- Add explicit `SF3D_INFERENCE_MODE=auto|mock|real` resolution.
-- Expose readiness status through `GET /api/health`.
-- Update the frontend to show backend mode before generation and hide unsupported export choices.
-- Align README, `.env.example`, and planning artifacts with the actual runtime behavior.
+- Validate the official upstream runner on a machine with the required native toolchain.
+- Improve local preview output quality without breaking the GLB contract.
+- Add browser-level preview smoke coverage when the project adopts a frontend test runner.
+- Continue aligning README, `.env.example`, and runtime docs with observed setup behavior.
 
 ## Architecture
 

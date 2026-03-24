@@ -159,6 +159,7 @@ npm run dev
 ## Planning docs
 
 - Detailed execution plan: [docs/PROJECT_PLAN.md](c:\github\my-projects\sf3d-web-tool\docs\PROJECT_PLAN.md)
+- Runtime behavior and fallback notes: [docs/RUNTIME_MODES.md](c:\github\my-projects\sf3d-web-tool\docs\RUNTIME_MODES.md)
 
 ## Demo goals for the finished product
 

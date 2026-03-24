@@ -5,6 +5,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 from PIL import Image
+import trimesh
 
 from app.core.config import get_settings
 
@@ -187,6 +188,38 @@ def test_generation_endpoint_runs_explicit_local_preview_mode(tmp_path: Path, mo
     assert any(path.endswith("generated.zip") for path in payload["asset_files"])
     assert any(path.endswith("mesh.glb") for path in payload["asset_files"])
     assert any("local preview mode" in note.lower() for note in payload["notes"])
+
+
+def test_local_preview_generation_writes_a_parseable_glb(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("SF3D_INFERENCE_MODE", "local")
+    monkeypatch.setenv("SF3D_OUTPUT_DIR", str(tmp_path / "outputs"))
+    get_settings.cache_clear()
+
+    response = client.post(
+        "/api/generate-3d",
+        data={
+            "remove_background": "false",
+            "auto_crop": "false",
+            "normalize_size": "true",
+            "export_format": "glb",
+        },
+        files={"image": ("sample.png", create_png_bytes(), "image/png")},
+    )
+
+    get_settings.cache_clear()
+
+    payload = response.json()
+    mesh_artifact = next(artifact for artifact in payload["artifacts"] if artifact["kind"] == "mesh")
+    mesh_path = tmp_path / "outputs" / payload["job_id"] / Path(mesh_artifact["relative_path"])
+    mesh_scene = trimesh.load(mesh_path, force="scene")
+    geometries = list(mesh_scene.geometry.values())
+
+    assert response.status_code == 200
+    assert mesh_path.is_file()
+    assert mesh_path.read_bytes()[:4] == b"glTF"
+    assert geometries
+    assert sum(len(geometry.vertices) for geometry in geometries) > 0
+    assert sum(len(geometry.faces) for geometry in geometries) > 0
 
 
 def test_generation_endpoint_runs_official_runner_when_mock_disabled(
