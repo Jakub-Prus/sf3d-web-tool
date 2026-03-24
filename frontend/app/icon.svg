@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="sf3d-gradient" x1="12" x2="52" y1="10" y2="54" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#f59e0b" />
+      <stop offset="1" stop-color="#f97316" />
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="16" fill="#101b2d" />
+  <path
+    fill="url(#sf3d-gradient)"
+    d="M18 18h28v8H30v6h12c5.523 0 10 4.477 10 10s-4.477 10-10 10H18v-8h24a2 2 0 0 0 0-4H30c-6.627 0-12-5.373-12-12V18Z"
+  />
+  <circle cx="48" cy="18" r="6" fill="#fb923c" />
+</svg>

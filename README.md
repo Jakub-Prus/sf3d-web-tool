@@ -36,45 +36,100 @@ sf3d-web-tool/
 ## Current scaffold status
 
 - A dedicated Git repository has been initialized in this folder.
-- The FastAPI app exposes `GET /api/health` and `POST /api/generate-3d`.
+- The FastAPI app exposes:
+  - `GET /api/health`
+  - `POST /api/generate-3d`
+  - `GET /api/jobs/{job_id}/artifacts/{artifact_path}`
 - The generation endpoint supports two paths:
   - default mock contract flow for local scaffold work
   - official `stable-fast-3d` runner execution when mock mode is disabled and the upstream repo is installed
-- The mock flow currently:
-  - saves the uploaded image
-  - records preprocessing choices
-  - writes placeholder metadata for the future SF3D integration
+- The backend now:
+  - saves both the original upload and a processed input image
+  - returns browser-loadable artifact URLs and download metadata
+  - writes job metadata, runner logs, and artifact manifests to disk
+  - applies local image normalization and alpha-based auto-cropping before inference
 - The Next.js app includes:
   - upload form
   - generation options
   - result summary panel
-  - viewer placeholder panel for the planned React Three Fiber integration
+  - React Three Fiber GLB viewer
+  - download actions for generated artifacts
+- The frontend now checks backend readiness on page load and explains whether preview is expected before you run generation.
 
-## Immediate next steps
+## Current limitations
 
-1. Install the upstream `stable-fast-3d` Python dependencies and Hugging Face access in [models/stable-fast-3d](c:\github\my-projects\sf3d-web-tool\models\stable-fast-3d).
-2. Disable mock mode and validate backend inference end to end through [backend/app/services/inference.py](c:\github\my-projects\sf3d-web-tool\backend\app\services\inference.py).
-3. Add GLB loading in [frontend/components/viewer-panel.tsx](c:\github\my-projects\sf3d-web-tool\frontend\components\viewer-panel.tsx).
-4. Add first-class preprocessing with Pillow or OpenCV in [backend/app/services/preprocess.py](c:\github\my-projects\sf3d-web-tool\backend\app\services\preprocess.py).
+- The official upstream SF3D CLI still produces GLB output only in this integration, so real `obj` export is rejected.
+- Background removal requests are recorded, but local alpha matting is not yet configured in the backend.
+- The upstream CLI may still apply its own background and foreground preprocessing even after local preprocessing runs.
+
+## Runtime modes
+
+Fresh-clone default behavior is `SF3D_INFERENCE_MODE=auto`.
+
+- `auto`
+  - uses real inference when the official SF3D runner is present and importable
+  - falls back to a local silhouette-extrusion preview mesh when the official runner is unavailable
+- `mock`
+  - always returns a valid contract response without a real preview mesh
+- `local`
+  - always generates a lightweight local GLB preview mesh from the uploaded image silhouette
+- `real`
+  - requires the upstream SF3D runner to be present and configured
+
+The frontend preview is expected when the backend resolves to `local` or `real` mode and the run produces a GLB.
 
 ## Setup outline
 
 ### Backend
 
 ```powershell
-cd backend
-python -m venv .venv
-.venv\Scripts\Activate.ps1
-pip install -e .[dev]
-uvicorn app.main:app --reload --port 8000
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -e "./backend[dev]"
+python -m uvicorn app.main:app --reload --port 8000 --app-dir backend
 ```
 
-To run the official SF3D path instead of the mock contract, install the upstream repo dependencies under [models/stable-fast-3d](c:\github\my-projects\sf3d-web-tool\models\stable-fast-3d), then set:
+To run with the default auto behavior:
+
+1. Leave `SF3D_INFERENCE_MODE=auto`.
+2. If the upstream repo is present and runnable, the backend will resolve to real mode.
+3. If the upstream repo is missing or not runnable, the backend will resolve to local preview mode and the UI will still show a browser-loadable GLB.
+
+To force the official SF3D path instead of auto/mock fallback:
+
+1. Clone or update the upstream repo in [models/stable-fast-3d](c:\github\my-projects\sf3d-web-tool\models\stable-fast-3d).
+2. Install the upstream dependencies in the environment that will execute `run.py`.
+3. Request access to the gated model on Hugging Face and log in with a read token.
+4. Set the backend environment variables below.
 
 ```powershell
-$env:SF3D_ENABLE_MOCK_INFERENCE="false"
+$env:SF3D_INFERENCE_MODE="real"
 $env:SF3D_REPO_DIR="c:\github\my-projects\sf3d-web-tool\models\stable-fast-3d"
+$env:SF3D_PYTHON_EXECUTABLE="c:\github\my-projects\sf3d-web-tool\.venv\Scripts\python.exe"
+# Optional when no compatible GPU is available:
+$env:SF3D_FORCE_CPU="true"
 ```
+
+Legacy support:
+- `SF3D_ENABLE_MOCK_INFERENCE` is still honored when `SF3D_INFERENCE_MODE` is unset.
+- New configuration should use `SF3D_INFERENCE_MODE`.
+
+If you want a preview-capable fallback without the full upstream runtime, set:
+
+```powershell
+$env:SF3D_INFERENCE_MODE="local"
+```
+
+If you want the backend preprocessing path enabled, no extra flag is required. The backend will always:
+- persist the original upload
+- write a processed PNG input
+- record which preprocessing steps were requested versus actually applied
+
+Real-world expectations:
+- GPU is preferred for usable inference speed
+- CPU mode is available for verification, but it will be much slower
+- Windows support depends on the upstream repo and local PyTorch/CUDA compatibility
 
 ### Frontend
 
@@ -83,6 +138,23 @@ cd frontend
 npm install
 npm run dev
 ```
+
+## Manual verification
+
+1. Start the backend and frontend.
+2. Open the app in the browser.
+3. Upload a PNG, JPEG, or WEBP object image.
+4. Submit one run in mock mode and confirm:
+   - the request succeeds
+   - the backend status banner reports mock mode
+   - the inspector shows notes, preprocessing fields, and download links
+   - the viewer stays in the non-mesh fallback state
+5. Submit one run with `SF3D_INFERENCE_MODE=real` or `auto` plus a working SF3D repo and confirm:
+   - the request succeeds
+   - the backend status banner reports real mode
+   - the viewer loads a GLB scene
+   - artifact download links open backend-served files
+   - the processed input image and metadata are present in the job output directory
 
 ## Planning docs
 

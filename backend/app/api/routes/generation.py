@@ -9,7 +9,7 @@ from app.services.inference import (
     SF3DRunnerError,
     UnsupportedGenerationOptionError,
 )
-from app.services.preprocess import PreprocessOptions
+from app.services.preprocess import InvalidInputImageError, PreprocessOptions
 
 router = APIRouter(tags=["generation"])
 ALLOWED_IMAGE_TYPES = {"image/png", "image/jpeg", "image/webp"}
@@ -52,6 +52,8 @@ async def generate_3d(
     service = SF3DInferenceService(settings)
     try:
         return await service.generate(image, image_bytes, preprocess_options, export_format)
+    except InvalidInputImageError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except UnsupportedGenerationOptionError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except SF3DRunnerError as exc:

@@ -42,6 +42,28 @@
 - The repository documents architecture, scope, roadmap, and next implementation steps.
 - The scaffold is organized for direct SF3D integration without major restructuring.
 
+## Current implementation status
+
+- Backend generation contract is implemented with artifact URLs, processed-image metadata, and a read-only artifact route.
+- Frontend upload, inspector, downloads, and GLB viewer are implemented.
+- Local preprocessing currently applies normalization and alpha-based auto-crop.
+- Backend tests pass and frontend production build passes.
+- Runtime alignment is still in progress because fresh-clone mode defaults, health/readiness messaging, and clean typecheck behavior need to match.
+
+## Current gaps
+
+- Runtime mode defaults and developer-facing docs are inconsistent.
+- The clean-clone frontend typecheck workflow is brittle because it relies on `.next/types` existing first.
+- The UI previously exposed `obj` even though the real runner rejects it.
+- Background removal remains requested-but-not-applied locally.
+
+## Next fix slice
+
+- Add explicit `SF3D_INFERENCE_MODE=auto|mock|real` resolution.
+- Expose readiness status through `GET /api/health`.
+- Update the frontend to show backend mode before generation and hide unsupported export choices.
+- Align README, `.env.example`, and planning artifacts with the actual runtime behavior.
+
 ## Architecture
 
 ### End-to-end flow

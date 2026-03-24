@@ -1,12 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { DEFAULT_API_BASE_URL, ACCEPTED_IMAGE_TYPES } from "@/lib/config";
-import type { ExportFormat, GenerationResponse } from "@/lib/types";
+import type { ExportFormat, GenerationResponse, HealthResponse } from "@/lib/types";
 import { InspectorPanel } from "@/components/inspector-panel";
 import { ViewerPanel } from "@/components/viewer-panel";
 
-const EXPORT_FORMATS: ExportFormat[] = ["glb", "obj", "zip"];
+const PREVIEW_READY_EXPORT_FORMATS: ExportFormat[] = ["glb", "zip"];
+const MOCK_MODE_EXPORT_FORMATS: ExportFormat[] = ["glb"];
 const MAX_UPLOAD_SIZE_MB = 10;
 const BYTES_PER_MEGABYTE = 1024 * 1024;
 
@@ -19,10 +20,36 @@ export function UploadPanel() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [result, setResult] = useState<GenerationResponse | null>(null);
+  const [health, setHealth] = useState<HealthResponse | null>(null);
+  const [healthError, setHealthError] = useState<string | null>(null);
 
   const fileSummary = file
     ? `${file.name} - ${(file.size / BYTES_PER_MEGABYTE).toFixed(2)} MB`
     : "PNG, JPEG, or WEBP up to 10 MB";
+  const exportFormats =
+    health?.resolved_inference_mode === "mock" ? MOCK_MODE_EXPORT_FORMATS : PREVIEW_READY_EXPORT_FORMATS;
+
+  useEffect(() => {
+    async function loadHealth() {
+      try {
+        const response = await fetch(`${DEFAULT_API_BASE_URL}/health`);
+        if (!response.ok) {
+          throw new Error("Health request failed.");
+        }
+
+        const payload = (await response.json()) as HealthResponse;
+        setHealth(payload);
+        setExportFormat((currentFormat) =>
+          payload.resolved_inference_mode === "mock" ? "glb" : currentFormat,
+        );
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Unable to load backend status.";
+        setHealthError(message);
+      }
+    }
+
+    void loadHealth();
+  }, []);
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -60,7 +87,8 @@ export function UploadPanel() {
       });
 
       if (!response.ok) {
-        const message = await response.text();
+        const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
+        const message = payload?.detail ?? (await response.text()) ?? "Generation request failed.";
         throw new Error(message || "Generation request failed.");
       }
 
@@ -144,7 +172,7 @@ export function UploadPanel() {
             onChange={(event) => setExportFormat(event.target.value as ExportFormat)}
             className="rounded-2xl border border-[var(--page-line)] bg-white px-4 py-3 outline-none ring-0"
           >
-            {EXPORT_FORMATS.map((format) => (
+            {exportFormats.map((format) => (
               <option key={format} value={format}>
                 {format.toUpperCase()}
               </option>
@@ -153,9 +181,33 @@ export function UploadPanel() {
         </label>
 
         <div className="mt-6 rounded-2xl border border-[var(--page-line)] bg-slate-50 p-4 text-sm leading-6 text-[var(--page-soft)]">
-          The current backend returns a mock generation manifest. Swap in the real SF3D runner
-          once the model repository and CUDA runtime are in place.
+          {healthError
+            ? `Backend readiness could not be loaded: ${healthError}`
+            : health?.resolved_inference_mode === "real"
+              ? "Real SF3D mode is active. Preview and ZIP export should be available when the runner succeeds."
+              : health?.resolved_inference_mode === "local"
+                ? "Local preview mode is active. The backend will extrude the detected object silhouette into a lightweight GLB preview until the official SF3D runner is available."
+                : "Mock fallback is active. Requests will succeed, but the preview viewer will remain in fallback mode until real inference is ready."}
         </div>
+
+        {health ? (
+          <div className="mt-4 rounded-2xl border border-[var(--page-line)] bg-white px-4 py-3 text-sm text-ink">
+            <p className="font-semibold uppercase tracking-[0.18em] text-[var(--page-soft)]">
+              Backend mode
+            </p>
+            <p className="mt-2">
+              Resolved mode: <span className="font-semibold">{health.resolved_inference_mode}</span>
+            </p>
+            <p>Preview expected: {health.viewer_preview_expected ? "Yes" : "No"}</p>
+            {health.warnings.length > 0 ? (
+              <ul className="mt-3 space-y-2 text-[var(--page-soft)]">
+                {health.warnings.map((warning) => (
+                  <li key={warning}>{warning}</li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+        ) : null}
 
         {errorMessage ? (
           <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
@@ -173,8 +225,8 @@ export function UploadPanel() {
       </form>
 
       <div className="grid gap-6">
-        <ViewerPanel result={result} />
-        {result ? <InspectorPanel result={result} /> : null}
+        <ViewerPanel result={result} health={health} />
+        {result ? <InspectorPanel result={result} health={health} /> : null}
       </div>
     </section>
   );

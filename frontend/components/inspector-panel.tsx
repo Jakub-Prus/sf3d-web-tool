@@ -1,7 +1,9 @@
-import type { GenerationResponse } from "@/lib/types";
+import { resolveApiUrl } from "@/lib/config";
+import type { GenerationResponse, HealthResponse } from "@/lib/types";
 
 type InspectorPanelProps = {
   result: GenerationResponse;
+  health: HealthResponse | null;
 };
 
 const labelMap: Record<string, string> = {
@@ -11,12 +13,18 @@ const labelMap: Record<string, string> = {
   generation_time_seconds: "Generation time (s)",
 };
 
-export function InspectorPanel({ result }: InspectorPanelProps) {
+export function InspectorPanel({ result, health }: InspectorPanelProps) {
+  const downloadArtifacts = result.artifacts.filter((artifact) =>
+    ["archive", "mesh", "metadata", "input"].includes(artifact.kind),
+  );
+
   const facts = [
     [labelMap.job_id, result.job_id],
     [labelMap.status, result.status],
     [labelMap.export_format, result.export_format.toUpperCase()],
     [labelMap.generation_time_seconds, result.generation_time_seconds.toFixed(2)],
+    ["Runtime mode", health?.resolved_inference_mode ?? "unknown"],
+    ["Preview expected", health?.viewer_preview_expected ? "Yes" : "No"],
   ];
 
   return (
@@ -52,6 +60,57 @@ export function InspectorPanel({ result }: InspectorPanelProps) {
           {result.preprocessing_steps.map((step) => (
             <li key={step} className="rounded-2xl border border-[var(--page-line)] bg-white p-3">
               {step}
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      <div className="mt-6">
+        <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[var(--page-soft)]">
+          Preprocessing applied
+        </p>
+        <ul className="mt-3 space-y-2 text-sm leading-6 text-ink">
+          {result.preprocessing_applied.length > 0 ? (
+            result.preprocessing_applied.map((step) => (
+              <li key={step} className="rounded-2xl border border-[var(--page-line)] bg-white p-3">
+                {step}
+              </li>
+            ))
+          ) : (
+            <li className="rounded-2xl border border-[var(--page-line)] bg-white p-3">
+              No local preprocessing steps were applied before inference.
+            </li>
+          )}
+        </ul>
+      </div>
+
+      <div className="mt-6">
+        <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[var(--page-soft)]">
+          Downloads
+        </p>
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          {downloadArtifacts.map((artifact) => (
+            <a
+              key={artifact.relative_path}
+              href={resolveApiUrl(artifact.url)}
+              target="_blank"
+              rel="noreferrer"
+              className="rounded-2xl border border-[var(--page-line)] bg-white px-4 py-3 text-sm font-medium text-ink transition hover:border-tide"
+            >
+              Download {artifact.file_name}
+            </a>
+          ))}
+        </div>
+      </div>
+
+      <div className="mt-6">
+        <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[var(--page-soft)]">
+          Runner notes
+        </p>
+        <ul className="mt-3 space-y-2 text-sm leading-6 text-ink">
+          {result.notes.map((note) => (
+            <li key={note} className="rounded-2xl border border-[var(--page-line)] bg-white p-3">
+              {note}
             </li>
           ))}
         </ul>

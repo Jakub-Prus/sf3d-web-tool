@@ -42,3 +42,10 @@ def write_json_file(path: Path, payload: dict) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     return path
+
+
+def resolve_job_file(output_root: Path, job_id: str, relative_path: str) -> Path:
+    job_dir = (output_root / job_id).resolve()
+    candidate = (job_dir / relative_path).resolve()
+    candidate.relative_to(job_dir)
+    return candidate

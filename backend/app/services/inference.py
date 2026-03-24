@@ -2,17 +2,26 @@ from __future__ import annotations
 
 import asyncio
 import os
+import subprocess
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 from time import perf_counter
+from urllib.parse import quote
 from zipfile import ZIP_DEFLATED, ZipFile
 
 from fastapi import UploadFile
 
 from app.core.config import Settings
-from app.models.schemas import GenerationResponse
-from app.services.preprocess import PreprocessOptions, build_preprocessing_steps
+from app.models.schemas import ArtifactDescriptor, GenerationResponse
+from app.services.preprocess import (
+    InvalidInputImageError,
+    PreprocessOptions,
+    PreprocessResult,
+    preprocess_image,
+)
+from app.services.local_preview import generate_local_preview_mesh
+from app.services.runner_diagnostics import probe_runner_import, summarize_runner_failure
 from app.services.storage import (
     ARTIFACT_DIRECTORY_NAME,
     INPUT_DIRECTORY_NAME,
@@ -28,6 +37,7 @@ OBJ_PLACEHOLDER_NAME = "generated.obj.mock.txt"
 ZIP_PLACEHOLDER_NAME = "generated.zip.mock.txt"
 TEXTURE_PLACEHOLDER_NAME = "albedo.png.mock.txt"
 PREVIEW_PLACEHOLDER_NAME = "preview.txt"
+PROCESSED_INPUT_FILE_NAME = "processed-input.png"
 OFFICIAL_RUN_SCRIPT_NAME = "run.py"
 OFFICIAL_RUNNER_OUTPUT_DIRECTORY_NAME = "sf3d-runner-output"
 RUNNER_STDOUT_LOG_NAME = "sf3d-runner.stdout.log"
@@ -35,6 +45,9 @@ RUNNER_STDERR_LOG_NAME = "sf3d-runner.stderr.log"
 GENERATED_ZIP_NAME = "generated.zip"
 OFFICIAL_OUTPUT_SUBDIRECTORY = "0"
 OFFICIAL_OUTPUT_MESH_NAME = "mesh.glb"
+LOCAL_PREVIEW_REJECTED_EXPORT_MESSAGE = (
+    "The local preview mesh generator currently exports GLB output only. Use glb or zip."
+)
 
 
 class UnsupportedGenerationOptionError(ValueError):
@@ -60,23 +73,40 @@ class SF3DInferenceService:
         job_id, job_dir = create_job_directory(self._settings.output_dir)
         input_filename = sanitize_filename(image.filename or "upload.png")
         input_path = write_binary_file(job_dir / INPUT_DIRECTORY_NAME / input_filename, image_bytes)
+        preprocess_result = preprocess_image(image_bytes, preprocess_options)
+        processed_input_path = write_binary_file(
+            job_dir / INPUT_DIRECTORY_NAME / PROCESSED_INPUT_FILE_NAME,
+            preprocess_result.processed_bytes,
+        )
 
-        preprocessing_steps = build_preprocessing_steps(preprocess_options)
-        if self._settings.enable_mock_inference:
+        runner_import_probe = probe_runner_import(self._settings)
+        resolved_mode = self._settings.resolve_inference_mode(
+            runner_is_ready=runner_import_probe.is_ready
+        )
+        runtime_warnings = self._settings.build_runtime_warnings()
+        if runner_import_probe.warning and self._settings.inference_mode == "auto":
+            runtime_warnings.append(runner_import_probe.warning)
+
+        if resolved_mode == "mock":
             asset_files = self._create_mock_artifacts(job_dir, export_format)
-            generation_time_seconds = perf_counter() - started_at
-
             metadata_path = write_json_file(
                 job_dir / "metadata.json",
                 {
                     "job_id": job_id,
                     "export_format": export_format,
-                    "preprocessing_steps": preprocessing_steps,
+                    "preprocessing_steps": preprocess_result.requested_steps,
+                    "preprocessing_applied": preprocess_result.applied_steps,
+                    "preprocessing_metadata": preprocess_result.metadata,
                     "source_image": str(input_path),
+                    "processed_image": str(processed_input_path),
                     "asset_files": asset_files,
                     "mock_inference": True,
+                    "resolved_inference_mode": resolved_mode,
                 },
             )
+            artifact_paths = [input_path, processed_input_path, *[Path(path) for path in asset_files], metadata_path]
+            artifacts = self._build_artifact_descriptors(job_id, job_dir, artifact_paths)
+            generation_time_seconds = perf_counter() - started_at
 
             return GenerationResponse(
                 job_id=job_id,
@@ -86,22 +116,122 @@ class SF3DInferenceService:
                 generated_at=datetime.now(timezone.utc),
                 input_image_path=str(input_path),
                 asset_files=asset_files,
-                preprocessing_steps=preprocessing_steps,
+                artifacts=artifacts,
+                viewer_asset_url=None,
+                download_urls=self._build_download_urls(artifacts),
+                processed_image_url=self._find_artifact_url(artifacts, "input", PROCESSED_INPUT_FILE_NAME),
+                preprocessing_steps=preprocess_result.requested_steps,
+                preprocessing_applied=preprocess_result.applied_steps,
+                preprocessing_metadata=preprocess_result.metadata,
                 notes=[
                     "Mock inference mode is active until the official SF3D runner is connected.",
+                    *runtime_warnings,
+                    *preprocess_result.notes,
                     f"Metadata written to {metadata_path}",
                 ],
                 generation_time_seconds=generation_time_seconds,
+            )
+
+        if resolved_mode == "local":
+            return self._run_local_preview_generation(
+                job_id=job_id,
+                job_dir=job_dir,
+                input_path=input_path,
+                processed_input_path=processed_input_path,
+                preprocess_options=preprocess_options,
+                preprocess_result=preprocess_result,
+                export_format=export_format,
+                resolved_mode=resolved_mode,
+                runtime_warnings=runtime_warnings,
+                started_at=started_at,
             )
 
         return await self._run_official_inference(
             job_id=job_id,
             job_dir=job_dir,
             input_path=input_path,
+            processed_input_path=processed_input_path,
             preprocess_options=preprocess_options,
-            preprocessing_steps=preprocessing_steps,
+            preprocess_result=preprocess_result,
             export_format=export_format,
+            resolved_mode=resolved_mode,
             started_at=started_at,
+        )
+
+    def _run_local_preview_generation(
+        self,
+        *,
+        job_id: str,
+        job_dir: Path,
+        input_path: Path,
+        processed_input_path: Path,
+        preprocess_options: PreprocessOptions,
+        preprocess_result: PreprocessResult,
+        export_format: str,
+        resolved_mode: str,
+        runtime_warnings: list[str],
+        started_at: float,
+    ) -> GenerationResponse:
+        if export_format == "obj":
+            raise UnsupportedGenerationOptionError(LOCAL_PREVIEW_REJECTED_EXPORT_MESSAGE)
+
+        artifact_dir = job_dir / ARTIFACT_DIRECTORY_NAME
+        preview_result = generate_local_preview_mesh(
+            processed_image_bytes=preprocess_result.processed_bytes,
+            artifact_dir=artifact_dir,
+        )
+
+        artifact_paths = [input_path, processed_input_path, preview_result.mesh_path]
+        if export_format == "zip":
+            zip_path = self._write_local_preview_archive(
+                artifact_dir=artifact_dir,
+                mesh_path=preview_result.mesh_path,
+                processed_input_path=processed_input_path,
+            )
+            artifact_paths.insert(2, zip_path)
+
+        metadata_path = write_json_file(
+            job_dir / "metadata.json",
+            {
+                "job_id": job_id,
+                "export_format": export_format,
+                "preprocessing_steps": preprocess_result.requested_steps,
+                "preprocessing_applied": preprocess_result.applied_steps,
+                "preprocessing_metadata": preprocess_result.metadata,
+                "preprocess_options": asdict(preprocess_options),
+                "source_image": str(input_path),
+                "processed_image": str(processed_input_path),
+                "asset_files": [str(path) for path in artifact_paths],
+                "mock_inference": False,
+                "local_preview_generation": True,
+                "resolved_inference_mode": resolved_mode,
+            },
+        )
+        artifact_paths.append(metadata_path)
+        artifacts = self._build_artifact_descriptors(job_id, job_dir, artifact_paths)
+        generation_time_seconds = perf_counter() - started_at
+
+        notes = [*preview_result.notes, *runtime_warnings, *preprocess_result.notes]
+        notes.extend(self._build_preprocess_notes(preprocess_options, preprocess_result.applied_steps))
+        notes.append(f"Metadata written to {metadata_path}")
+
+        return GenerationResponse(
+            job_id=job_id,
+            status="completed",
+            export_format=export_format,
+            output_directory=str(job_dir),
+            generated_at=datetime.now(timezone.utc),
+            input_image_path=str(input_path),
+            asset_files=[str(path) for path in artifact_paths],
+            artifacts=artifacts,
+            viewer_asset_url=self._find_artifact_url(artifacts, "mesh"),
+            download_urls=self._build_download_urls(artifacts),
+            processed_image_url=self._find_artifact_url(artifacts, "input", PROCESSED_INPUT_FILE_NAME),
+            preprocessing_steps=preprocess_result.requested_steps,
+            preprocessing_applied=preprocess_result.applied_steps,
+            preprocessing_metadata=preprocess_result.metadata,
+            notes=notes,
+            generation_time_seconds=generation_time_seconds,
         )
 
     def _create_mock_artifacts(self, job_dir: Path, export_format: str) -> list[str]:
@@ -135,9 +265,11 @@ class SF3DInferenceService:
         job_id: str,
         job_dir: Path,
         input_path: Path,
+        processed_input_path: Path,
         preprocess_options: PreprocessOptions,
-        preprocessing_steps: list[str],
+        preprocess_result: PreprocessResult,
         export_format: str,
+        resolved_mode: str,
         started_at: float,
     ) -> GenerationResponse:
         if export_format == "obj":
@@ -148,7 +280,11 @@ class SF3DInferenceService:
         run_script_path = self._settings.sf3d_repo_dir / OFFICIAL_RUN_SCRIPT_NAME
         if not run_script_path.is_file():
             raise SF3DRunnerError(
-                f"Official SF3D runner was not found at {run_script_path}. Clone the repository into models/stable-fast-3d first."
+                f"Official SF3D runner was not found at {run_script_path}. Configure mock mode or clone the repository into models/stable-fast-3d first."
+            )
+        if not self._settings.is_sf3d_python_ready():
+            raise SF3DRunnerError(
+                f"The configured SF3D Python executable was not found at {self._settings.sf3d_python_executable}."
             )
 
         artifact_dir = job_dir / ARTIFACT_DIRECTORY_NAME
@@ -159,7 +295,7 @@ class SF3DInferenceService:
         command = [
             self._settings.sf3d_python_executable,
             str(run_script_path),
-            str(input_path),
+            str(processed_input_path),
             "--output-dir",
             str(runner_output_dir),
             "--pretrained-model",
@@ -172,33 +308,38 @@ class SF3DInferenceService:
         if self._settings.sf3d_force_cpu:
             runner_env["SF3D_USE_CPU"] = "1"
 
-        process = await asyncio.create_subprocess_exec(
-            *command,
-            cwd=str(self._settings.sf3d_repo_dir),
-            env=runner_env,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
         try:
-            stdout, stderr = await asyncio.wait_for(
-                process.communicate(),
+            completed_process = await asyncio.to_thread(
+                subprocess.run,
+                command,
+                cwd=str(self._settings.sf3d_repo_dir),
+                env=runner_env,
+                capture_output=True,
+                text=False,
                 timeout=self._settings.sf3d_runner_timeout_seconds,
+                check=False,
             )
-        except asyncio.TimeoutError as exc:
-            process.kill()
-            await process.communicate()
+        except subprocess.TimeoutExpired as exc:
             raise SF3DRunnerError(
                 f"Official SF3D runner timed out after {self._settings.sf3d_runner_timeout_seconds} seconds."
             ) from exc
+        except (OSError, ValueError, NotImplementedError) as exc:
+            raise SF3DRunnerError(
+                f"Failed to start the SF3D runner process with {self._settings.sf3d_python_executable}. Check the Python path and upstream environment setup."
+            ) from exc
 
-        stdout_text = stdout.decode("utf-8", errors="replace")
-        stderr_text = stderr.decode("utf-8", errors="replace")
+        stdout_text = completed_process.stdout.decode("utf-8", errors="replace")
+        stderr_text = completed_process.stderr.decode("utf-8", errors="replace")
         write_text_file(stdout_log_path, stdout_text)
         write_text_file(stderr_log_path, stderr_text)
 
-        if process.returncode != 0:
+        if completed_process.returncode != 0:
+            failure_summary = summarize_runner_failure(stdout_text, stderr_text)
+            failure_message = "Official SF3D runner failed. Check the saved stdout and stderr logs in the job directory."
+            if failure_summary:
+                failure_message = f"{failure_message} Summary: {failure_summary}"
             raise SF3DRunnerError(
-                "Official SF3D runner failed. Check the saved stdout and stderr logs in the job directory."
+                failure_message
             )
 
         mesh_path = (
@@ -209,10 +350,10 @@ class SF3DInferenceService:
                 f"Official SF3D runner finished without producing the expected mesh at {mesh_path}."
             )
 
-        asset_paths = self._collect_output_files(runner_output_dir)
+        artifact_paths = [input_path, processed_input_path, *self._collect_output_files(runner_output_dir)]
         if export_format == "zip":
             zip_path = self._write_artifact_archive(artifact_dir, runner_output_dir)
-            asset_paths.insert(0, str(zip_path))
+            artifact_paths.insert(2, zip_path)
 
         generation_time_seconds = perf_counter() - started_at
         notes = [
@@ -220,24 +361,31 @@ class SF3DInferenceService:
             f"Runner stdout log written to {stdout_log_path}",
             f"Runner stderr log written to {stderr_log_path}",
         ]
-        notes.extend(self._build_preprocess_notes(preprocess_options))
+        notes.extend(preprocess_result.notes)
+        notes.extend(self._build_preprocess_notes(preprocess_options, preprocess_result.applied_steps))
 
         metadata_path = write_json_file(
             job_dir / "metadata.json",
             {
                 "job_id": job_id,
                 "export_format": export_format,
-                "preprocessing_steps": preprocessing_steps,
+                "preprocessing_steps": preprocess_result.requested_steps,
+                "preprocessing_applied": preprocess_result.applied_steps,
+                "preprocessing_metadata": preprocess_result.metadata,
                 "preprocess_options": asdict(preprocess_options),
                 "source_image": str(input_path),
-                "asset_files": asset_paths,
+                "processed_image": str(processed_input_path),
+                "asset_files": [str(path) for path in artifact_paths],
                 "mock_inference": False,
+                "resolved_inference_mode": resolved_mode,
                 "runner_command": command,
                 "runner_stdout_log": str(stdout_log_path),
                 "runner_stderr_log": str(stderr_log_path),
                 "sf3d_repo_dir": str(self._settings.sf3d_repo_dir),
             },
         )
+        artifact_paths.extend([stdout_log_path, stderr_log_path, metadata_path])
+        artifacts = self._build_artifact_descriptors(job_id, job_dir, artifact_paths)
         notes.append(f"Metadata written to {metadata_path}")
 
         return GenerationResponse(
@@ -247,15 +395,21 @@ class SF3DInferenceService:
             output_directory=str(job_dir),
             generated_at=datetime.now(timezone.utc),
             input_image_path=str(input_path),
-            asset_files=asset_paths,
-            preprocessing_steps=preprocessing_steps,
+            asset_files=[str(path) for path in artifact_paths],
+            artifacts=artifacts,
+            viewer_asset_url=self._find_artifact_url(artifacts, "mesh"),
+            download_urls=self._build_download_urls(artifacts),
+            processed_image_url=self._find_artifact_url(artifacts, "input", PROCESSED_INPUT_FILE_NAME),
+            preprocessing_steps=preprocess_result.requested_steps,
+            preprocessing_applied=preprocess_result.applied_steps,
+            preprocessing_metadata=preprocess_result.metadata,
             notes=notes,
             generation_time_seconds=generation_time_seconds,
         )
 
-    def _collect_output_files(self, output_dir: Path) -> list[str]:
+    def _collect_output_files(self, output_dir: Path) -> list[Path]:
         return sorted(
-            str(path)
+            path
             for path in output_dir.rglob("*")
             if path.is_file()
         )
@@ -268,16 +422,100 @@ class SF3DInferenceService:
                     zip_file.write(path, arcname=path.relative_to(artifact_dir))
         return zip_path
 
-    def _build_preprocess_notes(self, preprocess_options: PreprocessOptions) -> list[str]:
+    def _write_local_preview_archive(
+        self,
+        *,
+        artifact_dir: Path,
+        mesh_path: Path,
+        processed_input_path: Path,
+    ) -> Path:
+        zip_path = artifact_dir / GENERATED_ZIP_NAME
+        with ZipFile(zip_path, mode="w", compression=ZIP_DEFLATED) as zip_file:
+            zip_file.write(mesh_path, arcname=mesh_path.relative_to(artifact_dir))
+            zip_file.write(processed_input_path, arcname=processed_input_path.name)
+        return zip_path
+
+    def _build_preprocess_notes(
+        self,
+        preprocess_options: PreprocessOptions,
+        applied_steps: list[str],
+    ) -> list[str]:
         notes = [
             "The upstream SF3D CLI currently applies its own background removal and foreground resize during inference."
         ]
-        if not preprocess_options.remove_background or not preprocess_options.auto_crop:
+        if preprocess_options.remove_background:
             notes.append(
-                "Requested background-removal or auto-crop toggles are recorded in metadata, but the upstream CLI does not expose matching disable flags yet."
+                "Background removal may still run upstream because the official SF3D CLI does not expose a disable flag."
             )
-        if not preprocess_options.normalize_size:
+        if preprocess_options.auto_crop and not any("Auto-crop" in step for step in applied_steps):
             notes.append(
-                "Requested normalize-size=false is recorded in metadata, but the upstream CLI still resizes the foreground internally."
+                "Auto-crop was requested but skipped locally because a reliable alpha silhouette was not available."
+            )
+        if preprocess_options.normalize_size:
+            notes.append(
+                "Local normalize-size preprocessing was applied before inference, but the upstream CLI may still resize the foreground internally."
             )
         return notes
+
+    def _build_artifact_descriptors(
+        self,
+        job_id: str,
+        job_dir: Path,
+        artifact_paths: list[Path],
+    ) -> list[ArtifactDescriptor]:
+        descriptors: list[ArtifactDescriptor] = []
+        seen_paths: set[str] = set()
+
+        for path in artifact_paths:
+            relative_path = path.relative_to(job_dir).as_posix()
+            if relative_path in seen_paths:
+                continue
+            seen_paths.add(relative_path)
+
+            descriptors.append(
+                ArtifactDescriptor(
+                    kind=self._classify_artifact_kind(path),
+                    file_name=path.name,
+                    relative_path=relative_path,
+                    url=self._build_artifact_url(job_id, relative_path),
+                )
+            )
+
+        return descriptors
+
+    def _classify_artifact_kind(self, path: Path) -> str:
+        suffix = path.suffix.lower()
+        if path.name == "metadata.json":
+            return "metadata"
+        if suffix == ".log":
+            return "log"
+        if suffix == ".zip":
+            return "archive"
+        if suffix == ".glb":
+            return "mesh"
+        return "input"
+
+    def _build_artifact_url(self, job_id: str, relative_path: str) -> str:
+        encoded_path = quote(relative_path, safe="/")
+        return f"{self._settings.api_prefix}/jobs/{job_id}/artifacts/{encoded_path}"
+
+    def _build_download_urls(self, artifacts: list[ArtifactDescriptor]) -> list[str]:
+        return [
+            artifact.url
+            for artifact in artifacts
+            if artifact.kind in {"archive", "mesh", "metadata", "input"}
+        ]
+
+    def _find_artifact_url(
+        self,
+        artifacts: list[ArtifactDescriptor],
+        kind: str,
+        file_name: str | None = None,
+    ) -> str | None:
+        for artifact in artifacts:
+            if artifact.kind != kind:
+                continue
+            if file_name is not None and artifact.file_name != file_name:
+                continue
+            return artifact.url
+        return None

@@ -1,0 +1,22 @@
+# Runtime Alignment Plan
+
+- Goal: align runtime mode resolution, frontend readiness messaging, and developer docs with the current implementation.
+- Scope: backend runtime config and health output, frontend readiness banner and export options, clean typecheck workflow, README and plan updates.
+- Assumptions:
+  - `SF3D_INFERENCE_MODE=auto` is the fresh-clone default.
+  - Auto mode should use real inference when the upstream repo exists, otherwise mock.
+  - `SF3D_ENABLE_MOCK_INFERENCE` remains supported only as a legacy fallback.
+- Steps:
+  - add shared runtime-mode resolution in backend config
+  - expose resolved mode and warnings through health
+  - consume health in the frontend before generation
+  - remove unsupported `obj` from the UI
+  - add a dedicated clean-clone typecheck config
+  - update README and project plan status sections
+- Validation:
+  - `python -m pytest backend`
+  - `npm run typecheck`
+  - `npm run build`
+- Risks:
+  - local environments that still depend on `SF3D_ENABLE_MOCK_INFERENCE` need clear compatibility messaging
+  - auto mode must not let health and generation disagree about whether preview is expected
