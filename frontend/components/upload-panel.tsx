@@ -10,6 +10,118 @@ const PREVIEW_READY_EXPORT_FORMATS: ExportFormat[] = ["glb", "zip"];
 const MOCK_MODE_EXPORT_FORMATS: ExportFormat[] = ["glb"];
 const MAX_UPLOAD_SIZE_MB = 10;
 const BYTES_PER_MEGABYTE = 1024 * 1024;
+const PROGRESS_UPDATE_INTERVAL_MS = 500;
+const SECONDS_PER_MINUTE = 60;
+
+type SubmitMode = HealthResponse["resolved_inference_mode"] | "unknown";
+
+type ProgressStage = {
+  startsAtSeconds: number;
+  title: string;
+  detail: string;
+};
+
+const GENERATION_PROGRESS_STAGES: Record<SubmitMode, ProgressStage[]> = {
+  mock: [
+    {
+      startsAtSeconds: 0,
+      title: "Uploading image and options",
+      detail: "Sending the request to the backend mock pipeline.",
+    },
+    {
+      startsAtSeconds: 2,
+      title: "Writing placeholder artifacts",
+      detail: "The backend is generating contract-safe mock outputs.",
+    },
+    {
+      startsAtSeconds: 4,
+      title: "Preparing response payload",
+      detail: "Finalizing metadata and browser-loadable artifact links.",
+    },
+  ],
+  local: [
+    {
+      startsAtSeconds: 0,
+      title: "Uploading image and options",
+      detail: "Sending the request and validating the uploaded file.",
+    },
+    {
+      startsAtSeconds: 2,
+      title: "Preprocessing input image",
+      detail: "Applying background removal, crop, and canvas normalization when requested.",
+    },
+    {
+      startsAtSeconds: 6,
+      title: "Building preview mesh",
+      detail: "Generating the local GLB preview mesh from the processed image silhouette and color-derived height cues.",
+    },
+    {
+      startsAtSeconds: 12,
+      title: "Finalizing GLB response",
+      detail: "Writing artifacts, metadata, and the viewer URL for the browser.",
+    },
+  ],
+  real: [
+    {
+      startsAtSeconds: 0,
+      title: "Uploading image and options",
+      detail: "Sending the request and validating the uploaded file.",
+    },
+    {
+      startsAtSeconds: 3,
+      title: "Preprocessing input image",
+      detail: "Applying local preprocessing before the official SF3D runner starts.",
+    },
+    {
+      startsAtSeconds: 10,
+      title: "Starting official SF3D runner",
+      detail: "Loading the model and preparing the upstream inference environment.",
+    },
+    {
+      startsAtSeconds: 30,
+      title: "Generating mesh and textures",
+      detail: "The official runner is reconstructing the asset and baking materials.",
+    },
+    {
+      startsAtSeconds: 60,
+      title: "Packaging final artifacts",
+      detail: "Saving the generated files, logs, and metadata for the response.",
+    },
+  ],
+  unknown: [
+    {
+      startsAtSeconds: 0,
+      title: "Submitting generation request",
+      detail: "The backend request is running.",
+    },
+    {
+      startsAtSeconds: 5,
+      title: "Still running",
+      detail: "The request has not finished yet, but the connection is still active.",
+    },
+  ],
+};
+
+function formatElapsedTime(totalSeconds: number): string {
+  const minutes = Math.floor(totalSeconds / SECONDS_PER_MINUTE);
+  const seconds = totalSeconds % SECONDS_PER_MINUTE;
+  if (minutes === 0) {
+    return `${seconds}s`;
+  }
+  return `${minutes}m ${seconds.toString().padStart(2, "0")}s`;
+}
+
+function getProgressState(mode: SubmitMode, elapsedSeconds: number) {
+  const stages = GENERATION_PROGRESS_STAGES[mode];
+  const activeStageIndex = stages.reduce((currentIndex, stage, stageIndex) => {
+    return elapsedSeconds >= stage.startsAtSeconds ? stageIndex : currentIndex;
+  }, 0);
+  return {
+    stages,
+    activeStageIndex,
+    activeStage: stages[activeStageIndex],
+  };
+}
 
 export function UploadPanel() {
   const [file, setFile] = useState<File | null>(null);
@@ -22,12 +134,34 @@ export function UploadPanel() {
   const [result, setResult] = useState<GenerationResponse | null>(null);
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [healthError, setHealthError] = useState<string | null>(null);
+  const [submitMode, setSubmitMode] = useState<SubmitMode>("unknown");
+  const [submitStartedAt, setSubmitStartedAt] = useState<number | null>(null);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
 
   const fileSummary = file
     ? `${file.name} - ${(file.size / BYTES_PER_MEGABYTE).toFixed(2)} MB`
     : "PNG, JPEG, or WEBP up to 10 MB";
   const exportFormats =
     health?.resolved_inference_mode === "mock" ? MOCK_MODE_EXPORT_FORMATS : PREVIEW_READY_EXPORT_FORMATS;
+  const progressState = getProgressState(submitMode, elapsedSeconds);
+
+  useEffect(() => {
+    if (!isSubmitting || submitStartedAt === null) {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      const nextElapsedSeconds = Math.max(
+        0,
+        Math.floor((Date.now() - submitStartedAt) / 1000),
+      );
+      setElapsedSeconds(nextElapsedSeconds);
+    }, PROGRESS_UPDATE_INTERVAL_MS);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [isSubmitting, submitStartedAt]);
 
   useEffect(() => {
     async function loadHealth() {
@@ -79,6 +213,9 @@ export function UploadPanel() {
     formData.append("export_format", exportFormat);
 
     setIsSubmitting(true);
+    setSubmitMode(health?.resolved_inference_mode ?? "unknown");
+    setSubmitStartedAt(Date.now());
+    setElapsedSeconds(0);
 
     try {
       const response = await fetch(`${DEFAULT_API_BASE_URL}/generate-3d`, {
@@ -186,7 +323,7 @@ export function UploadPanel() {
             : health?.resolved_inference_mode === "real"
               ? "Real SF3D mode is active. Preview and ZIP export should be available when the runner succeeds."
               : health?.resolved_inference_mode === "local"
-                ? "Local preview mode is active. The backend will extrude the detected object silhouette into a lightweight GLB preview until the official SF3D runner is available."
+                ? "Local preview mode is active. The backend will build a lightweight smoothed heightfield GLB preview until the official SF3D runner is available."
                 : "Mock fallback is active. Requests will succeed, but the preview viewer will remain in fallback mode until real inference is ready."}
         </div>
 
@@ -215,12 +352,56 @@ export function UploadPanel() {
           </div>
         ) : null}
 
+        {isSubmitting ? (
+          <div className="mt-4 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-4 text-sm text-sky-950">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-sky-700">
+                  Generation in progress
+                </p>
+                <p className="mt-2 text-base font-semibold">{progressState.activeStage.title}</p>
+              </div>
+              <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-sky-700">
+                {formatElapsedTime(elapsedSeconds)}
+              </span>
+            </div>
+            <p className="mt-2 leading-6 text-sky-900">{progressState.activeStage.detail}</p>
+            <div className="mt-4 h-2 overflow-hidden rounded-full bg-sky-100">
+              <div className="h-full w-2/5 animate-pulse rounded-full bg-sky-500" />
+            </div>
+            <ul className="mt-4 space-y-2">
+              {progressState.stages.map((stage, stageIndex) => {
+                const isActive = stageIndex === progressState.activeStageIndex;
+                const isCompleted = stageIndex < progressState.activeStageIndex;
+
+                return (
+                  <li
+                    key={`${stage.title}-${stage.startsAtSeconds}`}
+                    className={`rounded-2xl border px-3 py-2 ${
+                      isActive
+                        ? "border-sky-300 bg-white text-sky-950"
+                        : isCompleted
+                          ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                          : "border-sky-100 bg-white/70 text-sky-700"
+                    }`}
+                  >
+                    <span className="font-medium">{stage.title}</span>
+                  </li>
+                );
+              })}
+            </ul>
+            <p className="mt-3 text-xs leading-5 text-sky-700">
+              This is an estimated progress indicator based on the active runtime mode. The request is still running until the backend responds.
+            </p>
+          </div>
+        ) : null}
+
         <button
           type="submit"
           disabled={isSubmitting}
           className="mt-6 inline-flex items-center justify-center rounded-full bg-ink px-6 py-3 text-sm font-semibold uppercase tracking-[0.18em] text-white transition hover:bg-tide disabled:cursor-not-allowed disabled:bg-slate-500"
         >
-          {isSubmitting ? "Generating..." : "Run generate-3d"}
+          {isSubmitting ? progressState.activeStage.title : "Run generate-3d"}
         </button>
       </form>
 

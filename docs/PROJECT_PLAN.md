@@ -50,20 +50,23 @@
 - Backend tests pass and frontend production build passes.
 - Runtime alignment now includes three usable paths:
   - `mock` for placeholder contract testing
-  - `local` for preview-capable silhouette extrusion fallback
+  - `local` for preview-capable smoothed heightfield fallback
   - `real` for the official SF3D runner when the upstream environment is ready
+- Real mode has now been validated on a prepared Windows machine with the upstream native extensions, Hugging Face access, and CPU fallback enabled.
 - The viewer now keeps a persistent canvas mounted and includes explicit context-loss recovery UI.
+- The upload workflow now shows estimated progress stages so long-running real generations do not appear stuck.
 
 ## Current gaps
 
-- The official SF3D Windows environment still depends on native upstream extensions and gated model access.
-- The local preview fallback is intentionally lower fidelity than the official SF3D output.
+- The official SF3D Windows environment still depends on native upstream extensions, gated model access, and can be slow on CPU-only machines.
+- The local preview fallback is intentionally lower fidelity than the official textured SF3D output.
 - Local background removal is still heuristic and works best for border-connected, mostly solid-color backdrops.
+- Frontend progress is estimated from runtime mode timing; it is not yet backed by server-side job status updates.
 
 ## Next fix slice
 
-- Validate the official upstream runner on a machine with the required native toolchain.
-- Improve local preview output quality without breaking the GLB contract.
+- Add backend-backed job progress or status polling for long-running real generations.
+- Surface official textured outputs more explicitly in the UI when real mode succeeds.
 - Add browser-level preview smoke coverage when the project adopts a frontend test runner.
 - Continue aligning README, `.env.example`, and runtime docs with observed setup behavior.
 

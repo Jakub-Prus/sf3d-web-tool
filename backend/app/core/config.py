@@ -12,6 +12,7 @@ DEFAULT_SF3D_REPO_DIR = PROJECT_ROOT / "models" / "stable-fast-3d"
 DEFAULT_SF3D_PYTHON_EXECUTABLE = "python"
 DEFAULT_SF3D_PRETRAINED_MODEL = "stabilityai/stable-fast-3d"
 DEFAULT_SF3D_RUNNER_TIMEOUT_SECONDS = 30 * 60
+DEFAULT_SF3D_IMPORT_PROBE_TIMEOUT_SECONDS = 30
 InferenceMode = Literal["auto", "mock", "local", "real"]
 ResolvedInferenceMode = Literal["mock", "local", "real"]
 
@@ -36,10 +37,14 @@ class Settings(BaseSettings):
         default=DEFAULT_SF3D_RUNNER_TIMEOUT_SECONDS,
         alias="SF3D_RUNNER_TIMEOUT_SECONDS",
     )
+    sf3d_import_probe_timeout_seconds: int = Field(
+        default=DEFAULT_SF3D_IMPORT_PROBE_TIMEOUT_SECONDS,
+        alias="SF3D_IMPORT_PROBE_TIMEOUT_SECONDS",
+    )
     sf3d_force_cpu: bool = Field(default=False, alias="SF3D_FORCE_CPU")
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=str(PROJECT_ROOT / "backend" / ".env"),
         env_file_encoding="utf-8",
         extra="ignore",
         populate_by_name=True,

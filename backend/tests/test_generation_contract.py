@@ -2,6 +2,7 @@ import os
 import sys
 from io import BytesIO
 from pathlib import Path
+from zipfile import ZipFile
 
 from fastapi.testclient import TestClient
 from PIL import Image
@@ -27,7 +28,12 @@ def create_png_bytes(*, transparent: bool = False) -> bytes:
     return buffer.getvalue()
 
 
-def configure_fake_sf3d_runner(tmp_path: Path, monkeypatch) -> Path:
+def configure_fake_sf3d_runner(
+    tmp_path: Path,
+    monkeypatch,
+    *,
+    output_dir: str | Path | None = None,
+) -> Path:
     repo_dir = tmp_path / "stable-fast-3d"
     repo_dir.mkdir()
     (repo_dir / "run.py").write_text(
@@ -61,7 +67,8 @@ def configure_fake_sf3d_runner(tmp_path: Path, monkeypatch) -> Path:
     monkeypatch.delenv("SF3D_ENABLE_MOCK_INFERENCE", raising=False)
     monkeypatch.setenv("SF3D_REPO_DIR", str(repo_dir))
     monkeypatch.setenv("SF3D_PYTHON_EXECUTABLE", sys.executable)
-    monkeypatch.setenv("SF3D_OUTPUT_DIR", str(tmp_path / "outputs"))
+    resolved_output_dir = output_dir if output_dir is not None else tmp_path / "outputs"
+    monkeypatch.setenv("SF3D_OUTPUT_DIR", str(resolved_output_dir))
     get_settings.cache_clear()
     return repo_dir
 
@@ -189,6 +196,14 @@ def test_generation_endpoint_runs_explicit_local_preview_mode(tmp_path: Path, mo
     assert any(path.endswith("mesh.glb") for path in payload["asset_files"])
     assert any("local preview mode" in note.lower() for note in payload["notes"])
 
+    archive_artifact = next(artifact for artifact in payload["artifacts"] if artifact["kind"] == "archive")
+    archive_path = tmp_path / "outputs" / payload["job_id"] / Path(archive_artifact["relative_path"])
+    with ZipFile(archive_path) as zip_file:
+        archive_entries = set(zip_file.namelist())
+
+    assert "mesh.glb" in archive_entries
+    assert "processed-input.png" in archive_entries
+
 
 def test_local_preview_generation_writes_a_parseable_glb(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("SF3D_INFERENCE_MODE", "local")
@@ -217,7 +232,7 @@ def test_local_preview_generation_writes_a_parseable_glb(tmp_path: Path, monkeyp
     assert response.status_code == 200
     assert mesh_path.is_file()
     assert mesh_path.read_bytes()[:4] == b"glTF"
-    assert geometries
+    assert len(geometries) == 1
     assert sum(len(geometry.vertices) for geometry in geometries) > 0
     assert sum(len(geometry.faces) for geometry in geometries) > 0
 
@@ -249,6 +264,32 @@ def test_generation_endpoint_runs_official_runner_when_mock_disabled(
     assert any(path.endswith("mesh.glb") for path in payload["asset_files"])
     assert any(artifact["kind"] == "mesh" for artifact in payload["artifacts"])
     assert any("Official SF3D runner executed" in note for note in payload["notes"])
+
+
+def test_generation_endpoint_runs_official_runner_with_relative_output_dir(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    configure_fake_sf3d_runner(tmp_path, monkeypatch, output_dir="relative-outputs")
+
+    response = client.post(
+        "/api/generate-3d",
+        data={
+            "remove_background": "false",
+            "auto_crop": "false",
+            "normalize_size": "false",
+            "export_format": "glb",
+        },
+        files={"image": ("sample.png", create_png_bytes(), "image/png")},
+    )
+
+    get_settings.cache_clear()
+
+    payload = response.json()
+    assert response.status_code == 200
+    assert payload["status"] == "completed"
+    assert any(path.endswith("mesh.glb") for path in payload["asset_files"])
 
 
 def test_generation_endpoint_returns_zip_archive_in_real_runner_mode(

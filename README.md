@@ -40,9 +40,10 @@ sf3d-web-tool/
   - `GET /api/health`
   - `POST /api/generate-3d`
   - `GET /api/jobs/{job_id}/artifacts/{artifact_path}`
-- The generation endpoint supports two paths:
-  - default mock contract flow for local scaffold work
-  - official `stable-fast-3d` runner execution when mock mode is disabled and the upstream repo is installed
+- The generation endpoint supports three runtime outcomes:
+  - mock contract flow for scaffold and API work
+  - local preview GLB generation when the official runner is unavailable
+  - official `stable-fast-3d` runner execution when the upstream repo is installed and importable
 - The backend now:
   - saves both the original upload and a processed input image
   - returns browser-loadable artifact URLs and download metadata
@@ -51,6 +52,7 @@ sf3d-web-tool/
 - The Next.js app includes:
   - upload form
   - generation options
+  - estimated in-flight progress feedback while generation is running
   - result summary panel
   - React Three Fiber GLB viewer
   - download actions for generated artifacts
@@ -68,13 +70,14 @@ Fresh-clone default behavior is `SF3D_INFERENCE_MODE=auto`.
 
 - `auto`
   - uses real inference when the official SF3D runner is present and importable
-  - falls back to a local silhouette-extrusion preview mesh when the official runner is unavailable
+  - falls back to a local smoothed heightfield preview mesh when the official runner is unavailable
 - `mock`
   - always returns a valid contract response without a real preview mesh
 - `local`
-  - always generates a lightweight local GLB preview mesh from the uploaded image silhouette
+  - always generates a lightweight local GLB preview mesh from the uploaded image silhouette and color-derived height cues
 - `real`
   - requires the upstream SF3D runner to be present and configured
+  - can return textured official outputs, including material maps written by the upstream runner
 
 The frontend preview is expected when the backend resolves to `local` or `real` mode and the run produces a GLB.
 
@@ -107,6 +110,7 @@ To force the official SF3D path instead of auto/mock fallback:
 $env:SF3D_INFERENCE_MODE="real"
 $env:SF3D_REPO_DIR="c:\github\my-projects\sf3d-web-tool\models\stable-fast-3d"
 $env:SF3D_PYTHON_EXECUTABLE="c:\github\my-projects\sf3d-web-tool\.venv\Scripts\python.exe"
+$env:SF3D_IMPORT_PROBE_TIMEOUT_SECONDS="30"
 # Optional when no compatible GPU is available:
 $env:SF3D_FORCE_CPU="true"
 ```
@@ -130,6 +134,7 @@ Real-world expectations:
 - GPU is preferred for usable inference speed
 - CPU mode is available for verification, but it will be much slower
 - Windows support depends on the upstream repo and local PyTorch/CUDA compatibility
+- the import preflight timeout can be raised if the upstream environment has slow cold-start imports
 
 ### Frontend
 
@@ -149,12 +154,17 @@ npm run dev
    - the backend status banner reports mock mode
    - the inspector shows notes, preprocessing fields, and download links
    - the viewer stays in the non-mesh fallback state
-5. Submit one run with `SF3D_INFERENCE_MODE=real` or `auto` plus a working SF3D repo and confirm:
+5. Submit one run with `SF3D_INFERENCE_MODE=local` and confirm:
+   - the request succeeds
+   - the backend status banner reports local mode
+   - the viewer loads a real GLB preview mesh
+   - the output directory contains `mesh.glb`
+6. Submit one run with `SF3D_INFERENCE_MODE=real` or `auto` plus a working SF3D repo and confirm:
    - the request succeeds
    - the backend status banner reports real mode
    - the viewer loads a GLB scene
    - artifact download links open backend-served files
-   - the processed input image and metadata are present in the job output directory
+   - the processed input image, metadata, and upstream runner outputs are present in the job output directory
 
 ## Planning docs
 

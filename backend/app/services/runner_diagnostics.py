@@ -6,7 +6,6 @@ from dataclasses import dataclass
 
 from app.core.config import Settings
 
-RUNNER_IMPORT_CHECK_TIMEOUT_SECONDS = 10
 RUNNER_FAILURE_SUMMARY_MAX_LINES = 3
 RUNNER_FAILURE_SUMMARY_MAX_LENGTH = 240
 RUNNER_IMPORT_CHECK_SNIPPET = "import run"
@@ -36,6 +35,7 @@ def probe_runner_import(settings: Settings) -> RunnerImportProbeResult:
     if not settings.is_sf3d_repo_ready() or not settings.is_sf3d_python_ready():
         return RunnerImportProbeResult(is_ready=False)
 
+    import_timeout_seconds = settings.sf3d_import_probe_timeout_seconds
     probe_env = os.environ.copy()
     probe_env["PYTHONDONTWRITEBYTECODE"] = "1"
 
@@ -46,7 +46,7 @@ def probe_runner_import(settings: Settings) -> RunnerImportProbeResult:
             env=probe_env,
             capture_output=True,
             text=True,
-            timeout=RUNNER_IMPORT_CHECK_TIMEOUT_SECONDS,
+            timeout=import_timeout_seconds,
             check=False,
         )
     except subprocess.TimeoutExpired:
@@ -54,7 +54,7 @@ def probe_runner_import(settings: Settings) -> RunnerImportProbeResult:
             is_ready=False,
             warning=(
                 "The configured SF3D runner import check timed out after "
-                f"{RUNNER_IMPORT_CHECK_TIMEOUT_SECONDS} seconds."
+                f"{import_timeout_seconds} seconds."
             ),
         )
     except (OSError, ValueError, NotImplementedError):

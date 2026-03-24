@@ -291,13 +291,15 @@ class SF3DInferenceService:
         runner_output_dir = artifact_dir / OFFICIAL_RUNNER_OUTPUT_DIRECTORY_NAME
         stdout_log_path = job_dir / RUNNER_STDOUT_LOG_NAME
         stderr_log_path = job_dir / RUNNER_STDERR_LOG_NAME
+        absolute_processed_input_path = processed_input_path.resolve()
+        absolute_runner_output_dir = runner_output_dir.resolve()
 
         command = [
             self._settings.sf3d_python_executable,
             str(run_script_path),
-            str(processed_input_path),
+            str(absolute_processed_input_path),
             "--output-dir",
-            str(runner_output_dir),
+            str(absolute_runner_output_dir),
             "--pretrained-model",
             self._settings.sf3d_pretrained_model,
         ]

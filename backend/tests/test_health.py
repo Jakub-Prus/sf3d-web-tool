@@ -145,3 +145,35 @@ def test_health_endpoint_warns_when_runner_import_preflight_fails(tmp_path: Path
     assert payload["viewer_preview_expected"] is False
     assert any("import preflight check" in warning for warning in payload["warnings"])
     assert any("definitely_missing_sf3d_dependency" in warning for warning in payload["warnings"])
+
+
+def test_health_endpoint_respects_configured_import_probe_timeout(tmp_path: Path, monkeypatch) -> None:
+    repo_dir = tmp_path / "stable-fast-3d"
+    repo_dir.mkdir()
+    (repo_dir / "run.py").write_text(
+        "\n".join(
+            [
+                "import time",
+                "time.sleep(2)",
+                "print('ready')",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setenv("SF3D_INFERENCE_MODE", "auto")
+    monkeypatch.delenv("SF3D_ENABLE_MOCK_INFERENCE", raising=False)
+    monkeypatch.setenv("SF3D_REPO_DIR", str(repo_dir))
+    monkeypatch.setenv("SF3D_PYTHON_EXECUTABLE", sys.executable)
+    monkeypatch.setenv("SF3D_IMPORT_PROBE_TIMEOUT_SECONDS", "1")
+    get_settings.cache_clear()
+
+    response = client.get("/api/health")
+
+    get_settings.cache_clear()
+
+    payload = response.json()
+    assert response.status_code == 200
+    assert payload["resolved_inference_mode"] == "local"
+    assert payload["sf3d_repo_ready"] is False
+    assert any("timed out after 1 seconds" in warning for warning in payload["warnings"])

@@ -8,13 +8,14 @@ This project now has three practical runtime outcomes for generation requests:
   - returns placeholder artifacts only
   - useful for API contract work
 - `local`
-  - generates a lightweight GLB preview mesh by extruding the uploaded image silhouette
+  - generates a lightweight GLB preview mesh by extruding a smoothed silhouette and color-derived heightfield
   - useful when the official SF3D runtime is not available locally
 - `real`
   - runs the official `stable-fast-3d` pipeline
   - requires the upstream repo, dependencies, and model access
 
 `auto` resolves to `real` only when the official runner is present and importable. Otherwise it falls back to `local`.
+The import preflight timeout is configurable through `SF3D_IMPORT_PROBE_TIMEOUT_SECONDS` so slow cold starts do not trigger a false fallback.
 
 ## Why Local Mode Exists
 
@@ -29,6 +30,10 @@ In this repository, `local` mode keeps the product workflow usable:
 - local preprocessing now uses OpenCV-based border-connected color matting to remove white and other mostly solid-color backgrounds before mesh generation
 
 This is a preview-oriented fallback, not a substitute for the official SF3D output quality.
+
+## Real Mode Notes
+
+When the upstream runner is available, the app keeps the same response contract but serves the official SF3D output directory. That includes the textured `mesh.glb` and any material maps emitted by the upstream pipeline.
 
 ## Viewer Stability
 
