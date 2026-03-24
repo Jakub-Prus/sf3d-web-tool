@@ -219,7 +219,9 @@ export function ViewerPanel({ result, health }: ViewerPanelProps) {
             ? "The backend is currently resolved to mock mode, so preview is not expected until real inference is available."
             : health?.resolved_inference_mode === "local"
               ? "Upload an image to generate a local silhouette-based mesh preview. Once the official SF3D runner is ready, this viewer will load the higher-fidelity GLB instead."
-              : "Upload an image to generate a result. Once a real GLB is available, it will load directly in this viewer with orbit controls."}
+              : health?.expected_runner_device === "cuda"
+                ? "Upload an image to generate a real GPU-backed SF3D result. Once the GLB is available, it will load directly in this viewer with orbit controls."
+                : "Upload an image to generate a real CPU-backed SF3D result. Once the GLB is available, it will load directly in this viewer with orbit controls."}
         </p>
       </div>
     );

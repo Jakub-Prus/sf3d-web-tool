@@ -55,20 +55,23 @@
 - Real mode has now been validated on a prepared Windows machine with the upstream native extensions, Hugging Face access, and CPU fallback enabled.
 - The viewer now keeps a persistent canvas mounted and includes explicit context-loss recovery UI.
 - The upload workflow now shows estimated progress stages so long-running real generations do not appear stuck.
+- The repo now supports a documented Windows local-GPU path and a Docker/Linux CPU deployment path for the official SF3D runner.
+- The local Windows GPU setup now includes a scripted CUDA rebuild flow for the upstream native extensions and has been validated with a real `Device used:  cuda` generation.
 
 ## Current gaps
 
-- The official SF3D Windows environment still depends on native upstream extensions, gated model access, and can be slow on CPU-only machines.
+- The official SF3D runtime still depends on native upstream extensions and gated model access in both local and deployed environments.
 - The local preview fallback is intentionally lower fidelity than the official textured SF3D output.
 - Local background removal is still heuristic and works best for border-connected, mostly solid-color backdrops.
 - Frontend progress is estimated from runtime mode timing; it is not yet backed by server-side job status updates.
+- Public deployments that stay on CPU will remain materially slower than local GPU runs.
 
 ## Next fix slice
 
 - Add backend-backed job progress or status polling for long-running real generations.
 - Surface official textured outputs more explicitly in the UI when real mode succeeds.
 - Add browser-level preview smoke coverage when the project adopts a frontend test runner.
-- Continue aligning README, `.env.example`, and runtime docs with observed setup behavior.
+- Add deployment automation around Docker image publishing and VPS rollout.
 
 ## Architecture
 

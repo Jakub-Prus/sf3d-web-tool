@@ -57,6 +57,7 @@ sf3d-web-tool/
   - React Three Fiber GLB viewer
   - download actions for generated artifacts
 - The frontend now checks backend readiness on page load and explains whether preview is expected before you run generation.
+- The frontend now defaults to a same-origin `/api` proxy, so deployed builds do not need browser calls to `localhost:8000`.
 
 ## Current limitations
 
@@ -81,9 +82,22 @@ Fresh-clone default behavior is `SF3D_INFERENCE_MODE=auto`.
 
 The frontend preview is expected when the backend resolves to `local` or `real` mode and the run produces a GLB.
 
+## Supported real-inference runtimes
+
+This repo now supports two documented real-inference setups:
+
+- `local-gpu`
+  - Windows-native
+  - uses the repo `.venv`
+  - official SF3D runner targets `cuda`
+- `deploy-cpu`
+  - Docker on a Linux VPS
+  - official SF3D runner targets `cpu`
+  - slower, but keeps the public deployment usable without a GPU host
+
 ## Setup outline
 
-### Backend
+### Local Windows GPU backend
 
 ```powershell
 py -3.12 -m venv .venv
@@ -92,6 +106,31 @@ python -m pip install --upgrade pip
 python -m pip install -e "./backend[dev]"
 python -m uvicorn app.main:app --reload --port 8000 --app-dir backend
 ```
+
+Install a CUDA-enabled PyTorch build into the same repo `.venv`, then verify it:
+
+```powershell
+python - <<'PY'
+import torch
+print(torch.__version__)
+print(torch.cuda.is_available())
+if torch.cuda.is_available():
+    print(torch.cuda.get_device_name(0))
+PY
+```
+
+If you want real local GPU execution on Windows, you also need a local CUDA toolkit and a rebuild of the upstream native extensions so `texture_baker` exposes a CUDA kernel. A CUDA-enabled PyTorch wheel alone is not enough.
+
+Install CUDA-enabled PyTorch and the local CUDA toolkit, then run the included rebuild helper:
+
+```powershell
+python -m pip install --upgrade pip
+python -m pip install --index-url https://download.pytorch.org/whl/cu128 torch torchvision torchaudio
+python .\scripts\patch_windows_torch_cuda_header.py
+powershell -ExecutionPolicy Bypass -File .\scripts\rebuild_sf3d_windows_cuda.ps1
+```
+
+The patch helper is idempotent. It only applies a known Windows `nvcc` compatibility patch to the PyTorch header that currently trips `C2872: 'std' ambiguous symbol` during CUDA extension builds.
 
 To run with the default auto behavior:
 
@@ -111,9 +150,29 @@ $env:SF3D_INFERENCE_MODE="real"
 $env:SF3D_REPO_DIR="c:\github\my-projects\sf3d-web-tool\models\stable-fast-3d"
 $env:SF3D_PYTHON_EXECUTABLE="c:\github\my-projects\sf3d-web-tool\.venv\Scripts\python.exe"
 $env:SF3D_IMPORT_PROBE_TIMEOUT_SECONDS="30"
-# Optional when no compatible GPU is available:
-$env:SF3D_FORCE_CPU="true"
+$env:SF3D_FORCE_CPU="false"
 ```
+
+Expected local GPU verification sequence:
+
+```powershell
+nvidia-smi
+python - <<'PY'
+from app.core.config import Settings
+from app.services.runtime_diagnostics import get_runtime_diagnostics
+from app.services.runner_diagnostics import probe_runner_import
+
+settings = Settings()
+print(probe_runner_import(settings))
+print(get_runtime_diagnostics(settings))
+PY
+```
+
+Healthy local GPU output should show:
+- `probe_runner_import(...).is_ready=True`
+- `cuda_available=True`
+- `cuda_extension_ready=True`
+- `expected_runner_device='cuda'`
 
 Legacy support:
 - `SF3D_ENABLE_MOCK_INFERENCE` is still honored when `SF3D_INFERENCE_MODE` is unset.
@@ -131,10 +190,33 @@ If you want the backend preprocessing path enabled, no extra flag is required. T
 - record which preprocessing steps were requested versus actually applied
 
 Real-world expectations:
-- GPU is preferred for usable inference speed
-- CPU mode is available for verification, but it will be much slower
+- GPU is the recommended local runtime
+- CPU mode is still available for verification and deployment, but it will be much slower
 - Windows support depends on the upstream repo and local PyTorch/CUDA compatibility
 - the import preflight timeout can be raised if the upstream environment has slow cold-start imports
+
+### Docker/Linux CPU deployment
+
+The public deployment target is Docker on a Linux VPS. It uses the official SF3D runner on CPU and proxies browser `/api` traffic through the frontend container.
+
+Requirements:
+- Docker and Docker Compose
+- a Hugging Face token with access to `stabilityai/stable-fast-3d`
+
+Start the stack:
+
+```powershell
+$env:HF_TOKEN="your_hugging_face_read_token"
+docker compose up --build
+```
+
+Runtime defaults in the compose stack:
+- backend runs in `real` mode
+- backend sets `SF3D_FORCE_CPU=true`
+- frontend is exposed on port `3000`
+- backend artifacts and Hugging Face cache use persistent Docker volumes
+
+The frontend talks to the backend through its own `/api` proxy route, so the browser does not need direct access to the backend container.
 
 ### Frontend
 
@@ -162,9 +244,13 @@ npm run dev
 6. Submit one run with `SF3D_INFERENCE_MODE=real` or `auto` plus a working SF3D repo and confirm:
    - the request succeeds
    - the backend status banner reports real mode
+   - the backend status banner shows the expected runner device (`CUDA` locally or `CPU` in Docker deploy)
+   - the backend status banner shows whether the CUDA extension is ready
+   - on Windows local GPU, `sf3d-runner.stdout.log` includes `Device used:  cuda`
    - the viewer loads a GLB scene
    - artifact download links open backend-served files
    - the processed input image, metadata, and upstream runner outputs are present in the job output directory
+   - the runner notes mention the target device used for that job
 
 ## Planning docs
 

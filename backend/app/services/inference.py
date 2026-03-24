@@ -22,6 +22,7 @@ from app.services.preprocess import (
 )
 from app.services.local_preview import generate_local_preview_mesh
 from app.services.runner_diagnostics import probe_runner_import, summarize_runner_failure
+from app.services.runtime_diagnostics import get_runtime_diagnostics
 from app.services.storage import (
     ARTIFACT_DIRECTORY_NAME,
     INPUT_DIRECTORY_NAME,
@@ -293,6 +294,7 @@ class SF3DInferenceService:
         stderr_log_path = job_dir / RUNNER_STDERR_LOG_NAME
         absolute_processed_input_path = processed_input_path.resolve()
         absolute_runner_output_dir = runner_output_dir.resolve()
+        runtime_diagnostics = get_runtime_diagnostics(self._settings)
 
         command = [
             self._settings.sf3d_python_executable,
@@ -302,9 +304,9 @@ class SF3DInferenceService:
             str(absolute_runner_output_dir),
             "--pretrained-model",
             self._settings.sf3d_pretrained_model,
+            "--device",
+            runtime_diagnostics.expected_runner_device,
         ]
-        if self._settings.sf3d_force_cpu:
-            command.extend(["--device", "cpu"])
 
         runner_env = os.environ.copy()
         if self._settings.sf3d_force_cpu:
@@ -360,6 +362,16 @@ class SF3DInferenceService:
         generation_time_seconds = perf_counter() - started_at
         notes = [
             "Official SF3D runner executed via the cloned stable-fast-3d repository.",
+            (
+                "Official SF3D runner target device: "
+                f"{runtime_diagnostics.expected_runner_device}"
+                + (
+                    f" ({runtime_diagnostics.cuda_device_name})"
+                    if runtime_diagnostics.expected_runner_device == "cuda" and runtime_diagnostics.cuda_device_name
+                    else ""
+                )
+                + "."
+            ),
             f"Runner stdout log written to {stdout_log_path}",
             f"Runner stderr log written to {stderr_log_path}",
         ]

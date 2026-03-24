@@ -34,5 +34,11 @@ export type HealthResponse = {
   resolved_inference_mode: ResolvedInferenceMode;
   sf3d_repo_ready: boolean;
   viewer_preview_expected: boolean;
+  torch_version: string | null;
+  cuda_available: boolean;
+  cuda_device_name: string | null;
+  cuda_extension_ready: boolean;
+  sf3d_force_cpu: boolean;
+  expected_runner_device: "cpu" | "cuda";
   warnings: string[];
 };

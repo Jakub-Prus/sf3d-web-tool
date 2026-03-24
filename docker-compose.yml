@@ -1,0 +1,35 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    environment:
+      PROJECT_NAME: SF3D Web Tool API
+      API_PREFIX: /api
+      FRONTEND_ORIGIN: http://localhost:3000
+      SF3D_INFERENCE_MODE: real
+      SF3D_REPO_DIR: /opt/stable-fast-3d
+      SF3D_PYTHON_EXECUTABLE: python
+      SF3D_IMPORT_PROBE_TIMEOUT_SECONDS: "30"
+      SF3D_FORCE_CPU: "true"
+      SF3D_OUTPUT_DIR: /app/outputs
+      HF_HOME: /data/huggingface
+      HF_TOKEN: ${HF_TOKEN}
+    volumes:
+      - backend_outputs:/app/outputs
+      - hf_cache:/data/huggingface
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    depends_on:
+      - backend
+    environment:
+      BACKEND_PROXY_URL: http://backend:8000/api
+    ports:
+      - "3000:3000"
+
+volumes:
+  backend_outputs:
+  hf_cache:

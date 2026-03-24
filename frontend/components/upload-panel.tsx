@@ -218,7 +218,7 @@ export function UploadPanel() {
     setElapsedSeconds(0);
 
     try {
-      const response = await fetch(`${DEFAULT_API_BASE_URL}/generate-3d`, {
+        const response = await fetch(`${DEFAULT_API_BASE_URL}/generate-3d`, {
         method: "POST",
         body: formData,
       });
@@ -321,7 +321,9 @@ export function UploadPanel() {
           {healthError
             ? `Backend readiness could not be loaded: ${healthError}`
             : health?.resolved_inference_mode === "real"
-              ? "Real SF3D mode is active. Preview and ZIP export should be available when the runner succeeds."
+              ? health.expected_runner_device === "cuda"
+                ? "Real SF3D mode is active on GPU. Preview and ZIP export should be available with the fastest local runtime."
+                : "Real SF3D mode is active on CPU. Preview and ZIP export should be available, but generation will be slower."
               : health?.resolved_inference_mode === "local"
                 ? "Local preview mode is active. The backend will build a lightweight smoothed heightfield GLB preview until the official SF3D runner is available."
                 : "Mock fallback is active. Requests will succeed, but the preview viewer will remain in fallback mode until real inference is ready."}
@@ -335,6 +337,12 @@ export function UploadPanel() {
             <p className="mt-2">
               Resolved mode: <span className="font-semibold">{health.resolved_inference_mode}</span>
             </p>
+            <p>
+              Runner device: <span className="font-semibold">{health.expected_runner_device.toUpperCase()}</span>
+              {health.cuda_device_name ? ` (${health.cuda_device_name})` : ""}
+            </p>
+            <p>CUDA extension ready: {health.cuda_extension_ready ? "Yes" : "No"}</p>
+            <p>Force CPU: {health.sf3d_force_cpu ? "Yes" : "No"}</p>
             <p>Preview expected: {health.viewer_preview_expected ? "Yes" : "No"}</p>
             {health.warnings.length > 0 ? (
               <ul className="mt-3 space-y-2 text-[var(--page-soft)]">

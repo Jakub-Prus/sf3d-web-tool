@@ -9,6 +9,7 @@ ExportFormat = Literal["glb", "obj", "zip"]
 GenerationStatus = Literal["mocked", "completed"]
 ArtifactKind = Literal["input", "mesh", "archive", "log", "metadata"]
 ResolvedInferenceMode = Literal["mock", "local", "real"]
+RunnerDevice = Literal["cpu", "cuda"]
 
 
 class HealthResponse(BaseModel):
@@ -17,6 +18,12 @@ class HealthResponse(BaseModel):
     resolved_inference_mode: ResolvedInferenceMode
     sf3d_repo_ready: bool
     viewer_preview_expected: bool
+    torch_version: str | None
+    cuda_available: bool
+    cuda_device_name: str | None
+    cuda_extension_ready: bool
+    sf3d_force_cpu: bool
+    expected_runner_device: RunnerDevice
     warnings: list[str]
 
 

@@ -14,6 +14,7 @@ os.environ.setdefault("SF3D_OUTPUT_DIR", str(Path(__file__).resolve().parents[2]
 get_settings.cache_clear()
 
 from app.main import app  # noqa: E402
+from app.services.runtime_diagnostics import RuntimeDiagnostics
 
 client = TestClient(app)
 
@@ -242,6 +243,28 @@ def test_generation_endpoint_runs_official_runner_when_mock_disabled(
     monkeypatch,
 ) -> None:
     configure_fake_sf3d_runner(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        "app.services.inference.get_runtime_diagnostics",
+        lambda settings: RuntimeDiagnostics(
+            torch_version="2.10.0+cu128",
+            cuda_available=False,
+            cuda_device_name=None,
+            cuda_extension_ready=False,
+            sf3d_force_cpu=False,
+            expected_runner_device="cpu",
+        ),
+    )
+    monkeypatch.setattr(
+        "app.services.runtime_diagnostics.get_runtime_diagnostics",
+        lambda settings: RuntimeDiagnostics(
+            torch_version="2.10.0+cu128",
+            cuda_available=False,
+            cuda_device_name=None,
+            cuda_extension_ready=False,
+            sf3d_force_cpu=False,
+            expected_runner_device="cpu",
+        ),
+    )
 
     response = client.post(
         "/api/generate-3d",
@@ -264,6 +287,7 @@ def test_generation_endpoint_runs_official_runner_when_mock_disabled(
     assert any(path.endswith("mesh.glb") for path in payload["asset_files"])
     assert any(artifact["kind"] == "mesh" for artifact in payload["artifacts"])
     assert any("Official SF3D runner executed" in note for note in payload["notes"])
+    assert any("target device: cpu" in note.lower() for note in payload["notes"])
 
 
 def test_generation_endpoint_runs_official_runner_with_relative_output_dir(
@@ -290,6 +314,58 @@ def test_generation_endpoint_runs_official_runner_with_relative_output_dir(
     assert response.status_code == 200
     assert payload["status"] == "completed"
     assert any(path.endswith("mesh.glb") for path in payload["asset_files"])
+
+
+def test_generation_endpoint_records_cuda_target_when_available(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    configure_fake_sf3d_runner(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        "app.services.inference.get_runtime_diagnostics",
+        lambda settings: RuntimeDiagnostics(
+            torch_version="2.10.0+cu128",
+            cuda_available=True,
+            cuda_device_name="RTX Test GPU",
+            cuda_extension_ready=True,
+            sf3d_force_cpu=False,
+            expected_runner_device="cuda",
+        ),
+    )
+    monkeypatch.setattr(
+        "app.services.runtime_diagnostics.get_runtime_diagnostics",
+        lambda settings: RuntimeDiagnostics(
+            torch_version="2.10.0+cu128",
+            cuda_available=True,
+            cuda_device_name="RTX Test GPU",
+            cuda_extension_ready=True,
+            sf3d_force_cpu=False,
+            expected_runner_device="cuda",
+        ),
+    )
+
+    response = client.post(
+        "/api/generate-3d",
+        data={
+            "remove_background": "false",
+            "auto_crop": "false",
+            "normalize_size": "false",
+            "export_format": "glb",
+        },
+        files={"image": ("sample.png", create_png_bytes(), "image/png")},
+    )
+
+    get_settings.cache_clear()
+
+    payload = response.json()
+    metadata_path = tmp_path / "outputs" / payload["job_id"] / "metadata.json"
+    metadata_text = metadata_path.read_text(encoding="utf-8")
+
+    assert response.status_code == 200
+    assert any("target device: cuda" in note.lower() for note in payload["notes"])
+    assert "RTX Test GPU" in " ".join(payload["notes"])
+    assert '"--device"' in metadata_text
+    assert '"cuda"' in metadata_text
 
 
 def test_generation_endpoint_returns_zip_archive_in_real_runner_mode(

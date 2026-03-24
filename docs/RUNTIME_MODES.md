@@ -34,6 +34,22 @@ This is a preview-oriented fallback, not a substitute for the official SF3D outp
 ## Real Mode Notes
 
 When the upstream runner is available, the app keeps the same response contract but serves the official SF3D output directory. That includes the textured `mesh.glb` and any material maps emitted by the upstream pipeline.
+Health responses now also report whether the official runner is expected to use `cpu` or `cuda`.
+
+## Deployment Presets
+
+Two real-inference presets are now supported:
+
+- `local-gpu`
+  - Windows-native
+  - CUDA-enabled PyTorch in the repo `.venv`
+  - CUDA toolkit plus rebuilt native extensions if you want the texture baker to stay on CUDA
+  - use `scripts/patch_windows_torch_cuda_header.py` and `scripts/rebuild_sf3d_windows_cuda.ps1` to make the Windows CUDA path reproducible
+  - `SF3D_FORCE_CPU=false`
+- `deploy-cpu`
+  - Docker on Linux
+  - CPU-only PyTorch in the container
+  - `SF3D_FORCE_CPU=true`
 
 ## Viewer Stability
 
@@ -65,6 +81,13 @@ $env:SF3D_INFERENCE_MODE="auto"
 ```
 
 If the official runner is not ready, the backend will resolve to `local` and still produce a real `mesh.glb`.
+
+For Windows local GPU, the supported rebuild flow is:
+
+```powershell
+python .\scripts\patch_windows_torch_cuda_header.py
+powershell -ExecutionPolicy Bypass -File .\scripts\rebuild_sf3d_windows_cuda.ps1
+```
 
 To force the fallback explicitly:
 

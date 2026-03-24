@@ -1,5 +1,6 @@
 from functools import lru_cache
 from pathlib import Path
+import platform
 from typing import Literal
 
 from pydantic import Field
@@ -13,6 +14,7 @@ DEFAULT_SF3D_PYTHON_EXECUTABLE = "python"
 DEFAULT_SF3D_PRETRAINED_MODEL = "stabilityai/stable-fast-3d"
 DEFAULT_SF3D_RUNNER_TIMEOUT_SECONDS = 30 * 60
 DEFAULT_SF3D_IMPORT_PROBE_TIMEOUT_SECONDS = 30
+DEFAULT_FRONTEND_ORIGIN = "http://localhost:3000"
 InferenceMode = Literal["auto", "mock", "local", "real"]
 ResolvedInferenceMode = Literal["mock", "local", "real"]
 
@@ -42,6 +44,7 @@ class Settings(BaseSettings):
         alias="SF3D_IMPORT_PROBE_TIMEOUT_SECONDS",
     )
     sf3d_force_cpu: bool = Field(default=False, alias="SF3D_FORCE_CPU")
+    frontend_origin: str = Field(default=DEFAULT_FRONTEND_ORIGIN, alias="FRONTEND_ORIGIN")
 
     model_config = SettingsConfigDict(
         env_file=str(PROJECT_ROOT / "backend" / ".env"),
@@ -97,6 +100,22 @@ class Settings(BaseSettings):
             warnings.append(
                 "SF3D_ENABLE_MOCK_INFERENCE is a legacy setting. Prefer SF3D_INFERENCE_MODE."
             )
+        if self.inference_mode in {"auto", "real"} and not self.sf3d_force_cpu:
+            from app.services.runtime_diagnostics import get_runtime_diagnostics
+
+            runtime_diagnostics = get_runtime_diagnostics(self)
+            if not runtime_diagnostics.cuda_available:
+                warnings.append(
+                    "CUDA is not available in the configured SF3D Python environment. Real inference will run on CPU until a CUDA-enabled PyTorch build is installed."
+                )
+            elif not runtime_diagnostics.cuda_extension_ready:
+                warning = (
+                    "CUDA is available, but the SF3D texture baker is not compiled for CUDA on this machine. "
+                    "Real inference will keep using CPU until the native extensions are rebuilt with a CUDA toolkit."
+                )
+                if platform.system() == "Windows":
+                    warning += " Run scripts\\rebuild_sf3d_windows_cuda.ps1 after installing the CUDA toolkit."
+                warnings.append(warning)
 
         return warnings
 

@@ -24,6 +24,12 @@ export function InspectorPanel({ result, health }: InspectorPanelProps) {
     [labelMap.export_format, result.export_format.toUpperCase()],
     [labelMap.generation_time_seconds, result.generation_time_seconds.toFixed(2)],
     ["Runtime mode", health?.resolved_inference_mode ?? "unknown"],
+    [
+      "Runner device",
+      health
+        ? `${health.expected_runner_device.toUpperCase()}${health.cuda_device_name ? ` (${health.cuda_device_name})` : ""}`
+        : "unknown",
+    ],
     ["Preview expected", health?.viewer_preview_expected ? "Yes" : "No"],
   ];
 
