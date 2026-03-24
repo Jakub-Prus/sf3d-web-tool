@@ -3,6 +3,7 @@ Name: sf3d-web-tool-backend
 Version: 0.1.0
 Summary: FastAPI backend scaffold for the SF3D Web Tool project.
 Requires-Python: >=3.11
+Requires-Dist: opencv-python-headless<5.0.0,>=4.10.0
 Requires-Dist: fastapi<1.0.0,>=0.116.0
 Requires-Dist: numpy<3.0.0,>=1.26.4
 Requires-Dist: pillow<12.0.0,>=11.1.0

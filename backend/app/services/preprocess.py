@@ -3,11 +3,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from io import BytesIO
 
+import numpy as np
 from PIL import Image, UnidentifiedImageError
+from app.services.masking import detect_foreground_mask
 
 PREPROCESS_CANVAS_SIZE_PX = 1024
 RGBA_MODE = "RGBA"
 PNG_SUFFIX = ".png"
+LOCAL_BACKGROUND_REMOVAL_STEP = "Remove background with local border-connected color matting"
 
 
 @dataclass(frozen=True)
@@ -57,9 +60,10 @@ def preprocess_image(image_bytes: bytes, options: PreprocessOptions) -> Preproce
             original_width, original_height = working_image.size
 
             if options.remove_background:
-                notes.append(
-                    "Background removal was requested, but no local background matting service is configured in the backend yet."
-                )
+                working_image, background_removed, background_note = _remove_background(working_image)
+                notes.append(background_note)
+                if background_removed:
+                    applied_steps.append(LOCAL_BACKGROUND_REMOVAL_STEP)
 
             alpha_bbox = _get_alpha_bbox(working_image)
             if options.auto_crop:
@@ -120,3 +124,17 @@ def _normalize_to_square_canvas(image: Image.Image, canvas_size: int) -> Image.I
     offset = ((canvas_size - resized_width) // 2, (canvas_size - resized_height) // 2)
     canvas.paste(resized_image, offset)
     return canvas
+
+
+def _remove_background(image: Image.Image) -> tuple[Image.Image, bool, str]:
+    mask_result = detect_foreground_mask(image)
+    if not mask_result.confident:
+        return image, False, mask_result.note
+
+    if mask_result.source == "alpha":
+        return image, True, mask_result.note
+
+    rgba_image = image.convert(RGBA_MODE)
+    rgba_array = np.asarray(rgba_image, dtype=np.uint8).copy()
+    rgba_array[~mask_result.foreground_mask, 3] = 0
+    return Image.fromarray(rgba_array), True, mask_result.note

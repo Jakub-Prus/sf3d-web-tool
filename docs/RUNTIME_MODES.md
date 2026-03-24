@@ -26,6 +26,7 @@ In this repository, `local` mode keeps the product workflow usable:
 - a browser-loadable `mesh.glb` is generated
 - the viewer can render a real model instead of placeholder text files
 - artifact routes and download flows remain exercised end to end
+- local preprocessing now uses OpenCV-based border-connected color matting to remove white and other mostly solid-color backgrounds before mesh generation
 
 This is a preview-oriented fallback, not a substitute for the official SF3D output quality.
 

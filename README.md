@@ -16,7 +16,7 @@ Convert a single 2D object image into a textured 3D mesh asset using SF3D, then 
 ## Stack
 
 - Frontend: Next.js, TypeScript, Tailwind CSS, React Three Fiber, Three.js
-- Backend: FastAPI, Python, PyTorch, Pillow/OpenCV-ready preprocessing layer
+- Backend: FastAPI, Python, PyTorch, Pillow + OpenCV preprocessing layer
 - 3D processing: `trimesh`, `open3d` hooks planned in the backend service layer
 - Storage: local disk first, S3-compatible storage later
 - Queue: Redis plus Celery or RQ reserved for a later phase
@@ -47,7 +47,7 @@ sf3d-web-tool/
   - saves both the original upload and a processed input image
   - returns browser-loadable artifact URLs and download metadata
   - writes job metadata, runner logs, and artifact manifests to disk
-  - applies local image normalization and alpha-based auto-cropping before inference
+  - applies local image normalization, OpenCV-based border-connected background matting, and alpha-based auto-cropping before inference
 - The Next.js app includes:
   - upload form
   - generation options
@@ -59,7 +59,7 @@ sf3d-web-tool/
 ## Current limitations
 
 - The official upstream SF3D CLI still produces GLB output only in this integration, so real `obj` export is rejected.
-- Background removal requests are recorded, but local alpha matting is not yet configured in the backend.
+- Local background removal now uses OpenCV in Lab color space. It works best for border-connected, mostly solid-color backdrops and can still struggle with shadows, gradients, or foreground colors that closely match the background.
 - The upstream CLI may still apply its own background and foreground preprocessing even after local preprocessing runs.
 
 ## Runtime modes

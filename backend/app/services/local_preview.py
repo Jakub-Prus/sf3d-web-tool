@@ -7,16 +7,13 @@ from pathlib import Path
 import numpy as np
 import trimesh
 from PIL import Image
+from app.services.masking import detect_foreground_mask
 
 LOCAL_PREVIEW_GRID_SIZE = 32
-LOCAL_PREVIEW_ALPHA_THRESHOLD = 24
-LOCAL_PREVIEW_BACKGROUND_DISTANCE_THRESHOLD = 36.0
 LOCAL_PREVIEW_BASE_DEPTH = 0.12
 LOCAL_PREVIEW_DEPTH_VARIATION = 0.18
 LOCAL_PREVIEW_MESH_NAME = "mesh.glb"
 LOCAL_PREVIEW_MIN_OCCUPIED_CELLS = 1
-RGBA_CHANNEL_COUNT = 4
-RGB_CHANNEL_COUNT = 3
 RGB_MAX_VALUE = 255.0
 LUMINANCE_WEIGHTS = np.asarray([0.299, 0.587, 0.114], dtype=np.float32)
 
@@ -76,30 +73,8 @@ def _resize_for_preview(image: Image.Image, grid_size: int) -> Image.Image:
 
 
 def _build_occupancy_mask(rgba_array: np.ndarray) -> tuple[np.ndarray, str]:
-    alpha_channel = rgba_array[..., 3]
-    if np.any(alpha_channel < RGB_MAX_VALUE):
-        occupancy_mask = alpha_channel >= LOCAL_PREVIEW_ALPHA_THRESHOLD
-        return occupancy_mask, "Local preview used the image alpha channel to detect the foreground silhouette."
-
-    rgb_array = rgba_array[..., :RGB_CHANNEL_COUNT].astype(np.float32)
-    background_rgb = _estimate_background_color(rgb_array)
-    color_distance = np.linalg.norm(rgb_array - background_rgb, axis=2)
-    occupancy_mask = color_distance >= LOCAL_PREVIEW_BACKGROUND_DISTANCE_THRESHOLD
-    if np.any(occupancy_mask):
-        return (
-            occupancy_mask,
-            "Local preview estimated the background from the image corners and extruded the detected foreground colors.",
-        )
-
-    return occupancy_mask, "Local preview could not separate the foreground from the background with corner-color heuristics."
-
-
-def _estimate_background_color(rgb_array: np.ndarray) -> np.ndarray:
-    top_left = rgb_array[0, 0]
-    top_right = rgb_array[0, -1]
-    bottom_left = rgb_array[-1, 0]
-    bottom_right = rgb_array[-1, -1]
-    return np.mean([top_left, top_right, bottom_left, bottom_right], axis=0)
+    mask_result = detect_foreground_mask(Image.fromarray(rgba_array))
+    return mask_result.foreground_mask, mask_result.note
 
 
 def _build_voxel_mesh(rgba_array: np.ndarray, occupancy_mask: np.ndarray) -> trimesh.Trimesh:
@@ -134,7 +109,7 @@ def _build_voxel_mesh(rgba_array: np.ndarray, occupancy_mask: np.ndarray) -> tri
 
 
 def _compute_extrusion_depth(rgba: np.ndarray) -> float:
-    rgb = rgba[:RGB_CHANNEL_COUNT].astype(np.float32) / RGB_MAX_VALUE
+    rgb = rgba[:3].astype(np.float32) / RGB_MAX_VALUE
     alpha = float(rgba[3]) / RGB_MAX_VALUE
     luminance = float(np.dot(rgb, LUMINANCE_WEIGHTS))
     detail_weight = max(alpha, 1.0 - luminance)

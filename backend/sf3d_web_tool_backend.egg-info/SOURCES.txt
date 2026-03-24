@@ -13,6 +13,7 @@ app/models/schemas.py
 app/services/__init__.py
 app/services/inference.py
 app/services/local_preview.py
+app/services/masking.py
 app/services/preprocess.py
 app/services/runner_diagnostics.py
 app/services/storage.py

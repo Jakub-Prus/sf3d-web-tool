@@ -46,7 +46,7 @@
 
 - Backend generation contract is implemented with artifact URLs, processed-image metadata, and a read-only artifact route.
 - Frontend upload, inspector, downloads, and GLB viewer are implemented.
-- Local preprocessing currently applies normalization and alpha-based auto-crop.
+- Local preprocessing now applies normalization, OpenCV-based background removal, and alpha-based auto-crop.
 - Backend tests pass and frontend production build passes.
 - Runtime alignment now includes three usable paths:
   - `mock` for placeholder contract testing
@@ -58,7 +58,7 @@
 
 - The official SF3D Windows environment still depends on native upstream extensions and gated model access.
 - The local preview fallback is intentionally lower fidelity than the official SF3D output.
-- Background removal remains requested-but-not-applied locally.
+- Local background removal is still heuristic and works best for border-connected, mostly solid-color backdrops.
 
 ## Next fix slice
 
@@ -227,7 +227,7 @@
 ### Choose 3 to 5 enhancements
 
 - Preprocessing pipeline
-  - Add background removal.
+  - Improve background removal robustness.
   - Add object centering.
   - Add auto-crop.
   - Add padding.
